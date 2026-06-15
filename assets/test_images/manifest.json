@@ -1,0 +1,26 @@
+[
+  {
+    "file": "01_red_point_blue_stars.png",
+    "generator": "red_point_with_blue_stars"
+  },
+  {
+    "file": "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "generator": "blue_circle_indigo_to_blue"
+  },
+  {
+    "file": "03_blue_point_rainbow_spiral.png",
+    "generator": "blue_point_and_rainbow_spiral"
+  },
+  {
+    "file": "04_darting_blue_line_rainbow_streaks.png",
+    "generator": "darting_blue_line_and_rainbow_star_trails"
+  },
+  {
+    "file": "05_violet_triangle_blue_fill.png",
+    "generator": "violet_triangle_blue_fill"
+  },
+  {
+    "file": "06_square_multicolor_edges.png",
+    "generator": "square_multicolor_edges"
+  }
+]

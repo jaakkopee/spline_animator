@@ -1,0 +1,3 @@
+[console_scripts]
+birth-of-elements = birth_of_the_four_classical_elements:main
+spline-animator = spline_animator:main

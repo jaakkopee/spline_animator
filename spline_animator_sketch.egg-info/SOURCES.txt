@@ -1,0 +1,10 @@
+README.md
+birth_of_the_four_classical_elements.py
+pyproject.toml
+spline_animator.py
+spline_animator_sketch.egg-info/PKG-INFO
+spline_animator_sketch.egg-info/SOURCES.txt
+spline_animator_sketch.egg-info/dependency_links.txt
+spline_animator_sketch.egg-info/entry_points.txt
+spline_animator_sketch.egg-info/requires.txt
+spline_animator_sketch.egg-info/top_level.txt

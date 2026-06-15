@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spline-animator-sketch"
+version = "0.1.0"
+description = "Sketch repo for spline-based image interpolation experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.4.9",
+]
+
+[project.scripts]
+spline-animator = "spline_animator:main"
+birth-of-elements = "birth_of_the_four_classical_elements:main"
+
+[tool.setuptools]
+py-modules = ["spline_animator", "birth_of_the_four_classical_elements"]

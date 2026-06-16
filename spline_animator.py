@@ -45,6 +45,50 @@ class SegmentSpec:
     spline_endpoint: str = "clamp"
 
 
+WIZARD_PRESETS: dict[str, SegmentSpec] = {
+    "cinematic-smooth": SegmentSpec(
+        frames=32,
+        easing="ease-in-out",
+        interpolation="catmull-rom",
+        alpha_blend="premultiplied",
+        spline_tension=0.1,
+        spline_bias=0.0,
+        spline_continuity=-0.15,
+        spline_endpoint="mirror",
+    ),
+    "stable-low-overshoot": SegmentSpec(
+        frames=20,
+        easing="smoothstep",
+        interpolation="catmull-rom",
+        alpha_blend="premultiplied",
+        spline_tension=0.35,
+        spline_bias=0.0,
+        spline_continuity=0.0,
+        spline_endpoint="clamp",
+    ),
+    "loop-friendly": SegmentSpec(
+        frames=24,
+        easing="linear",
+        interpolation="catmull-rom",
+        alpha_blend="premultiplied",
+        spline_tension=0.0,
+        spline_bias=0.0,
+        spline_continuity=0.0,
+        spline_endpoint="wrap",
+    ),
+    "fast-cuts": SegmentSpec(
+        frames=8,
+        easing="ease-out",
+        interpolation="linear",
+        alpha_blend="straight",
+        spline_tension=0.0,
+        spline_bias=0.0,
+        spline_continuity=0.0,
+        spline_endpoint="clamp",
+    ),
+}
+
+
 class SplineAnimator:
     """Minimal Catmull-Rom image spline interpolator."""
 
@@ -352,6 +396,70 @@ def discover_images(input_dir: Path) -> list[Path]:
     return sorted([p for p in input_dir.glob("*.png") if p.is_file()])
 
 
+def _prompt_text(prompt: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        value = input(f"{prompt}{suffix}: ").strip()
+        if value:
+            return value
+        if default is not None:
+            return default
+        print("Please enter a value.")
+
+
+def _prompt_yes_no(prompt: str, default: bool = True) -> bool:
+    options = "Y/n" if default else "y/N"
+    while True:
+        value = input(f"{prompt} [{options}]: ").strip().lower()
+        if not value:
+            return default
+        if value in {"y", "yes"}:
+            return True
+        if value in {"n", "no"}:
+            return False
+        print("Please answer yes or no.")
+
+
+def _prompt_int(prompt: str, default: int, min_value: int | None = None) -> int:
+    while True:
+        raw = _prompt_text(prompt, str(default))
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Please enter an integer.")
+            continue
+        if min_value is not None and value < min_value:
+            print(f"Value must be >= {min_value}.")
+            continue
+        return value
+
+
+def _prompt_float(prompt: str, default: float, min_value: float | None = None, max_value: float | None = None) -> float:
+    while True:
+        raw = _prompt_text(prompt, str(default))
+        try:
+            value = float(raw)
+        except ValueError:
+            print("Please enter a number.")
+            continue
+        if min_value is not None and value < min_value:
+            print(f"Value must be >= {min_value}.")
+            continue
+        if max_value is not None and value > max_value:
+            print(f"Value must be <= {max_value}.")
+            continue
+        return value
+
+
+def _prompt_choice(prompt: str, options: list[str], default: str) -> str:
+    option_set = set(options)
+    while True:
+        value = _prompt_text(prompt, default).strip().lower()
+        if value in option_set:
+            return value
+        print(f"Choose one of: {', '.join(options)}")
+
+
 def _default_segment_spec_from_args(args: argparse.Namespace) -> SegmentSpec:
     spline = _spline_control_from_args(args)
     return SegmentSpec(
@@ -449,6 +557,19 @@ def _add_spline_control_args(parser: argparse.ArgumentParser) -> None:
         choices=["clamp", "mirror", "wrap"],
         help="Endpoint handling for Catmull-Rom style interpolation.",
     )
+
+
+def _add_timeline_resolution_defaults(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--frames-per-segment", type=int, default=20)
+    parser.add_argument(
+        "--easing",
+        default="linear",
+        choices=["linear", "ease-in", "ease-out", "ease-in-out", "smoothstep", "smootherstep"],
+    )
+    parser.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
+    parser.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
+    parser.add_argument("--fps", type=int, default=24)
+    _add_spline_control_args(parser)
 
 
 def _normalize_endpoint_value(value: str) -> str:
@@ -619,12 +740,12 @@ def _load_timeline(
     return keyframe_paths, segments
 
 
-def _load_animator_and_segments(
+def _resolve_image_paths_and_segments(
     input_dir: Path,
     timeline_path: Path | None,
     default_spec: SegmentSpec,
     fps: int,
-) -> tuple[SplineAnimator, list[Path], list[SegmentSpec]]:
+) -> tuple[list[Path], list[SegmentSpec]]:
     if timeline_path is not None:
         image_paths, segments = _load_timeline(
             timeline_path=timeline_path,
@@ -643,8 +764,555 @@ def _load_animator_and_segments(
 
     if len(image_paths) < 2:
         raise ValueError(f"Need at least 2 keyframes from {input_dir}")
+    return image_paths, segments
+
+
+def _load_animator_and_segments(
+    input_dir: Path,
+    timeline_path: Path | None,
+    default_spec: SegmentSpec,
+    fps: int,
+) -> tuple[SplineAnimator, list[Path], list[SegmentSpec]]:
+    image_paths, segments = _resolve_image_paths_and_segments(
+        input_dir=input_dir,
+        timeline_path=timeline_path,
+        default_spec=default_spec,
+        fps=fps,
+    )
 
     return SplineAnimator.from_paths(image_paths), image_paths, segments
+
+
+def _format_json_error_path(path_tokens: list[Any]) -> str:
+    if not path_tokens:
+        return "$"
+    path = "$"
+    for token in path_tokens:
+        if isinstance(token, int):
+            path += f"[{token}]"
+        else:
+            path += f".{token}"
+    return path
+
+
+def _validate_timeline_schema(timeline_path: Path, schema_path: Path) -> list[str]:
+    try:
+        import jsonschema  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("jsonschema package is required for schema validation") from exc
+
+    timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
+    schema_data = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    validator = jsonschema.Draft202012Validator(schema_data)
+    errors: list[str] = []
+    for error in sorted(validator.iter_errors(timeline_data), key=lambda e: list(e.path)):
+        path = _format_json_error_path(list(error.path))
+        errors.append(f"{path}: {error.message}")
+    return errors
+
+
+def _load_render_hints_from_timeline(timeline_path: Path) -> tuple[ChromaKeySpec | None, tuple[int, int, int] | None]:
+    data = json.loads(timeline_path.read_text(encoding="utf-8"))
+    raw_hints = data.get("render_hints")
+    if raw_hints is None:
+        return None, None
+    if not isinstance(raw_hints, dict):
+        raise ValueError("render_hints must be an object when provided")
+
+    chroma: ChromaKeySpec | None = None
+    background: tuple[int, int, int] | None = None
+
+    raw_chroma = raw_hints.get("chroma_key")
+    if raw_chroma is not None:
+        color = _parse_rgb_color(str(raw_chroma))
+        threshold = float(raw_hints.get("chroma_threshold", 0.0))
+        if threshold < 0:
+            raise ValueError("render_hints.chroma_threshold must be >= 0")
+        chroma = ChromaKeySpec(color=color, threshold=threshold)
+
+    raw_bg = raw_hints.get("mp4_background")
+    if raw_bg is not None:
+        background = _parse_rgb_color(str(raw_bg))
+
+    return chroma, background
+
+
+def _estimate_rgba_frame_buffer_gib(width: int, height: int, frames: int) -> float:
+    byte_count = width * height * 4 * frames
+    return byte_count / (1024.0**3)
+
+
+def _timeline_doctor_warnings(
+    image_paths: list[Path],
+    segments: list[SegmentSpec],
+    fps: int,
+) -> tuple[list[str], tuple[int, int], float, int]:
+    warnings: list[str] = []
+    sizes: list[tuple[int, int]] = []
+    for image_path in image_paths:
+        with Image.open(image_path) as image:
+            sizes.append(image.size)
+
+    unique_sizes = sorted(set(sizes))
+    max_size = max(unique_sizes, key=lambda s: s[0] * s[1])
+    if len(unique_sizes) > 1:
+        warnings.append("Keyframes have mixed resolutions and will be resized to first image size.")
+
+    total_frames = sum(segment.frames for segment in segments) + 1
+    approx_gib = _estimate_rgba_frame_buffer_gib(max_size[0], max_size[1], total_frames)
+    if total_frames >= 2000:
+        warnings.append("High frame count detected; render may be slow and memory intensive.")
+    if approx_gib >= 1.0:
+        warnings.append(
+            "Estimated uncompressed RGBA frame buffer exceeds 1 GiB; consider fewer frames per segment."
+        )
+
+    for idx, segment in enumerate(segments):
+        has_custom_spline = any(
+            [
+                segment.spline_tension != 0.0,
+                segment.spline_bias != 0.0,
+                segment.spline_continuity != 0.0,
+                segment.spline_endpoint != "clamp",
+            ]
+        )
+        if segment.interpolation == "linear" and has_custom_spline:
+            warnings.append(f"Segment {idx} uses linear interpolation; spline_* values are ignored.")
+
+    if fps <= 0:
+        warnings.append("FPS should be positive for duration estimates.")
+
+    return warnings, max_size, approx_gib, total_frames
+
+
+def _segment_to_json_dict(segment: SegmentSpec) -> dict[str, Any]:
+    return {
+        "duration_frames": segment.frames,
+        "easing": segment.easing,
+        "interpolation": segment.interpolation,
+        "alpha_blend": segment.alpha_blend,
+        "spline_tension": segment.spline_tension,
+        "spline_bias": segment.spline_bias,
+        "spline_continuity": segment.spline_continuity,
+        "spline_endpoint": segment.spline_endpoint,
+    }
+
+
+def _wizard_pick_keyframes(available: list[Path]) -> list[Path]:
+    print("Available keyframes:")
+    for idx, image in enumerate(available, start=1):
+        print(f" {idx}. {image.name}")
+
+    if _prompt_yes_no("Use discovered order as-is?", default=True):
+        return available
+
+    while True:
+        raw = _prompt_text("Enter comma-separated 1-based indices", "1,2")
+        try:
+            indices = [int(part.strip()) for part in raw.split(",") if part.strip()]
+        except ValueError:
+            print("Please enter integers like 1,2,3")
+            continue
+
+        if len(indices) < 2:
+            print("Please choose at least two keyframes.")
+            continue
+        if any(i < 1 or i > len(available) for i in indices):
+            print("One or more indices are out of range.")
+            continue
+        selected = [available[i - 1] for i in indices]
+        return selected
+
+
+def _wizard_select_preset() -> tuple[str, SegmentSpec]:
+    presets = list(WIZARD_PRESETS.keys())
+    print("Presets:")
+    for idx, name in enumerate(presets, start=1):
+        print(f" {idx}. {name}")
+
+    while True:
+        raw = _prompt_text("Choose preset number", "1")
+        try:
+            index = int(raw)
+        except ValueError:
+            print("Please enter a number.")
+            continue
+        if 1 <= index <= len(presets):
+            name = presets[index - 1]
+            return name, SegmentSpec(**vars(WIZARD_PRESETS[name]))
+        print("Preset index out of range.")
+
+
+def _wizard_edit_segment(segment: SegmentSpec, segment_index: int) -> SegmentSpec:
+    print(f"Editing segment {segment_index}")
+    segment.frames = _prompt_int("  duration_frames", segment.frames, min_value=1)
+    segment.easing = _prompt_choice(
+        "  easing",
+        ["linear", "ease-in", "ease-out", "ease-in-out", "smoothstep", "smootherstep"],
+        segment.easing,
+    )
+    segment.interpolation = _prompt_choice("  interpolation", ["catmull-rom", "linear"], segment.interpolation)
+    segment.alpha_blend = _prompt_choice("  alpha_blend", ["premultiplied", "straight"], segment.alpha_blend)
+    segment.spline_tension = _prompt_float("  spline_tension", segment.spline_tension, min_value=-1.0, max_value=1.0)
+    segment.spline_bias = _prompt_float("  spline_bias", segment.spline_bias, min_value=-1.0, max_value=1.0)
+    segment.spline_continuity = _prompt_float(
+        "  spline_continuity", segment.spline_continuity, min_value=-1.0, max_value=1.0
+    )
+    segment.spline_endpoint = _prompt_choice(
+        "  spline_endpoint", ["clamp", "mirror", "wrap"], segment.spline_endpoint
+    )
+    return segment
+
+
+def _wizard_build_render_hints() -> dict[str, Any] | None:
+    if not _prompt_yes_no("Configure advanced render hints (chroma/mp4)?", default=False):
+        return None
+
+    hints: dict[str, Any] = {}
+    raw_chroma = _prompt_text("  chroma key color (R,G,B or #RRGGBB, blank for none)", "")
+    if raw_chroma:
+        _parse_rgb_color(raw_chroma)
+        hints["chroma_key"] = raw_chroma
+        hints["chroma_threshold"] = _prompt_float("  chroma threshold", 16.0, min_value=0.0)
+
+    raw_bg = _prompt_text("  mp4 background color (R,G,B or #RRGGBB, blank for none)", "")
+    if raw_bg:
+        _parse_rgb_color(raw_bg)
+        hints["mp4_background"] = raw_bg
+
+    return hints if hints else None
+
+
+def _wizard_output_target(default_output: str | None) -> Path:
+    while True:
+        mode = _prompt_choice("Output mode", ["new", "update"], "new")
+        if mode == "new":
+            path = Path(_prompt_text("Output file path", default_output or "timeline.wizard.json"))
+            return path
+
+        update_default = default_output or "timeline.example.json"
+        path = Path(_prompt_text("Existing file to update", update_default))
+        if path.exists():
+            return path
+        print(f"File does not exist: {path}")
+
+
+def _build_timeline_data_for_wizard(
+    input_dir: Path,
+    keyframes: list[Path],
+    base_segment: SegmentSpec,
+    fps: int,
+    render_hints: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[SegmentSpec]]:
+    segments = [SegmentSpec(**vars(base_segment)) for _ in range(len(keyframes) - 1)]
+
+    if _prompt_yes_no("Customize selected segments?", default=True):
+        while True:
+            raw = _prompt_text("Segment indices to edit (1-based, comma-separated)", "1")
+            try:
+                indices = [int(part.strip()) for part in raw.split(",") if part.strip()]
+            except ValueError:
+                print("Please enter integers like 1,3")
+                continue
+            if not indices:
+                print("Please choose at least one segment.")
+                continue
+            if any(i < 1 or i > len(segments) for i in indices):
+                print("One or more segment indices are out of range.")
+                continue
+            for i in indices:
+                segments[i - 1] = _wizard_edit_segment(segments[i - 1], i)
+            break
+
+    timeline_data: dict[str, Any] = {
+        "keyframes": [str(path.relative_to(input_dir)) if not path.is_absolute() else str(path) for path in keyframes],
+        "defaults": {
+            "frames": base_segment.frames,
+            "easing": base_segment.easing,
+            "interpolation": base_segment.interpolation,
+            "alpha_blend": base_segment.alpha_blend,
+            "spline_tension": base_segment.spline_tension,
+            "spline_bias": base_segment.spline_bias,
+            "spline_continuity": base_segment.spline_continuity,
+            "spline_endpoint": base_segment.spline_endpoint,
+        },
+        "segments": [_segment_to_json_dict(segment) for segment in segments],
+    }
+    if render_hints:
+        timeline_data["render_hints"] = render_hints
+
+    warnings, _, approx_gib, total_frames = _timeline_doctor_warnings(image_paths=keyframes, segments=segments, fps=fps)
+    print(f"Planned frames: {total_frames}, estimated RGBA buffer: {approx_gib:.2f} GiB")
+    if warnings:
+        print("Warnings:")
+        for warning in warnings:
+            print(f" - {warning}")
+
+    risky = any(
+        [
+            total_frames >= 2000,
+            approx_gib >= 1.0,
+        ]
+    )
+    if risky and not _prompt_yes_no("Risky settings detected. Continue writing timeline?", default=False):
+        raise RuntimeError("Timeline wizard canceled by user.")
+
+    return timeline_data, segments
+
+
+def _run_timeline_wizard(args: argparse.Namespace) -> None:
+    input_dir = Path(args.input_dir)
+    output_path = _wizard_output_target(args.output)
+    fps = _prompt_int("Target fps", args.fps, min_value=1)
+
+    available = discover_images(input_dir)
+    if len(available) < 2:
+        raise ValueError(f"Need at least 2 PNG files in {input_dir}")
+
+    keyframes = _wizard_pick_keyframes(available)
+    preset_name, preset = _wizard_select_preset()
+    print(f"Selected preset: {preset_name}")
+
+    preset.frames = _prompt_int("Default frames per segment", preset.frames, min_value=1)
+    if _prompt_yes_no("Adjust preset defaults before segment overrides?", default=False):
+        preset = _wizard_edit_segment(preset, 0)
+
+    render_hints = _wizard_build_render_hints()
+    timeline_data, _ = _build_timeline_data_for_wizard(
+        input_dir=input_dir,
+        keyframes=keyframes,
+        base_segment=preset,
+        fps=fps,
+        render_hints=render_hints,
+    )
+
+    if output_path.exists() and not _prompt_yes_no(f"Overwrite existing file {output_path}?", default=True):
+        raise RuntimeError("Timeline wizard canceled by user.")
+
+    output_path.write_text(json.dumps(timeline_data, indent=2), encoding="utf-8")
+
+    schema_path = Path(args.schema)
+    if schema_path.exists():
+        schema_errors = _validate_timeline_schema(output_path, schema_path)
+        if schema_errors:
+            print("Warning: written timeline has schema issues:")
+            for error in schema_errors:
+                print(f" - {error}")
+
+    print(f"Wrote timeline via wizard to {output_path}")
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _resolve_keyframes_from_selector(input_dir: Path, selector: str | None) -> list[Path]:
+    discovered = discover_images(input_dir)
+    if selector is None or not selector.strip():
+        if len(discovered) < 2:
+            raise ValueError(f"Need at least 2 PNG files in {input_dir}")
+        return discovered
+
+    selected: list[Path] = []
+    tokens = _split_csv(selector)
+    if len(tokens) < 2:
+        raise ValueError("keyframes selector must reference at least two items")
+
+    for token in tokens:
+        if token.isdigit():
+            idx = int(token)
+            if idx < 1 or idx > len(discovered):
+                raise ValueError(f"Keyframe index out of range: {idx}")
+            selected.append(discovered[idx - 1])
+            continue
+
+        path = _resolve_keyframe_path(token, input_dir)
+        if not path.exists():
+            raise ValueError(f"Keyframe path not found: {path}")
+        selected.append(path)
+
+    return selected
+
+
+def _coerce_easing(value: Any, context: str) -> str:
+    easing = str(value).strip().lower()
+    allowed = {"linear", "ease-in", "ease-out", "ease-in-out", "smoothstep", "smootherstep"}
+    if easing not in allowed:
+        raise ValueError(f"Invalid easing in {context}: {easing}")
+    return easing
+
+
+def _coerce_interpolation(value: Any, context: str) -> str:
+    mode = str(value).strip().lower()
+    allowed = {"catmull-rom", "linear"}
+    if mode not in allowed:
+        raise ValueError(f"Invalid interpolation in {context}: {mode}")
+    return mode
+
+
+def _coerce_alpha_blend(value: Any, context: str) -> str:
+    mode = str(value).strip().lower()
+    allowed = {"premultiplied", "straight"}
+    if mode not in allowed:
+        raise ValueError(f"Invalid alpha_blend in {context}: {mode}")
+    return mode
+
+
+def _segment_with_overrides(base: SegmentSpec, raw: dict[str, Any], context: str, fps: int) -> SegmentSpec:
+    duration_frames = raw.get("frames", raw.get("duration_frames", base.frames))
+    duration_seconds = raw.get("duration_seconds")
+    if duration_seconds is not None:
+        duration_frames = max(1, int(round(float(duration_seconds) * fps)))
+
+    try:
+        frames = int(duration_frames)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid duration in {context}") from exc
+    if frames < 1:
+        raise ValueError(f"frames in {context} must be >= 1")
+
+    spline = _coerce_spline_control(
+        tension_raw=raw.get("spline_tension", raw.get("tension", base.spline_tension)),
+        bias_raw=raw.get("spline_bias", raw.get("bias", base.spline_bias)),
+        continuity_raw=raw.get("spline_continuity", raw.get("continuity", base.spline_continuity)),
+        endpoint_raw=raw.get("spline_endpoint", raw.get("endpoint", base.spline_endpoint)),
+        context=context,
+    )
+
+    return SegmentSpec(
+        frames=frames,
+        easing=_coerce_easing(raw.get("easing", base.easing), context),
+        interpolation=_coerce_interpolation(raw.get("interpolation", base.interpolation), context),
+        alpha_blend=_coerce_alpha_blend(raw.get("alpha_blend", base.alpha_blend), context),
+        spline_tension=spline.tension,
+        spline_bias=spline.bias,
+        spline_continuity=spline.continuity,
+        spline_endpoint=spline.endpoint,
+    )
+
+
+def _apply_segment_overrides(segments: list[SegmentSpec], overrides_path: Path | None, fps: int) -> list[SegmentSpec]:
+    if overrides_path is None:
+        return segments
+    payload = json.loads(overrides_path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        raw_overrides = payload.get("segments")
+    else:
+        raw_overrides = payload
+
+    if not isinstance(raw_overrides, list):
+        raise ValueError("segment-overrides file must be a list or object with 'segments' list")
+
+    out = [SegmentSpec(**vars(segment)) for segment in segments]
+    for raw in raw_overrides:
+        if not isinstance(raw, dict):
+            raise ValueError("Each segment override entry must be an object")
+        raw_index = raw.get("index")
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Each segment override requires integer 'index'") from exc
+        if index < 1 or index > len(out):
+            raise ValueError(f"Segment override index out of range: {index}")
+
+        context = f"segment override {index}"
+        out[index - 1] = _segment_with_overrides(out[index - 1], raw, context=context, fps=fps)
+    return out
+
+
+def _run_timeline_compose(args: argparse.Namespace) -> None:
+    input_dir = Path(args.input_dir)
+    output_path = Path(args.output)
+    fps = int(args.fps)
+    if fps < 1:
+        raise ValueError("fps must be >= 1")
+
+    keyframes = _resolve_keyframes_from_selector(input_dir, args.keyframes)
+
+    preset_name = str(args.preset)
+    if preset_name not in WIZARD_PRESETS:
+        raise ValueError(f"Unknown preset: {preset_name}")
+
+    base = SegmentSpec(**vars(WIZARD_PRESETS[preset_name]))
+    if args.frames_per_segment is not None:
+        base.frames = int(args.frames_per_segment)
+    base = _segment_with_overrides(
+        base,
+        {
+            "easing": args.easing,
+            "interpolation": args.interpolation,
+            "alpha_blend": args.alpha_blend,
+            "spline_tension": args.spline_tension,
+            "spline_bias": args.spline_bias,
+            "spline_continuity": args.spline_continuity,
+            "spline_endpoint": args.spline_endpoint,
+            "frames": base.frames,
+        },
+        context="compose defaults",
+        fps=fps,
+    )
+
+    segments = [SegmentSpec(**vars(base)) for _ in range(len(keyframes) - 1)]
+    overrides_path = Path(args.segment_overrides_file) if args.segment_overrides_file else None
+    segments = _apply_segment_overrides(segments, overrides_path, fps=fps)
+
+    warnings, _, approx_gib, total_frames = _timeline_doctor_warnings(keyframes, segments, fps=fps)
+    risky = total_frames >= 2000 or approx_gib >= 1.0
+    if risky and not args.allow_risky:
+        raise RuntimeError(
+            "Risky timeline (high frame count or memory estimate). Re-run with --allow-risky to continue."
+        )
+
+    render_hints: dict[str, Any] | None = None
+    chroma = _chroma_key_from_args(args)
+    bg = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
+    if chroma is not None or bg is not None:
+        render_hints = {}
+        if chroma is not None:
+            render_hints["chroma_key"] = f"{chroma.color[0]},{chroma.color[1]},{chroma.color[2]}"
+            render_hints["chroma_threshold"] = chroma.threshold
+        if bg is not None:
+            render_hints["mp4_background"] = f"{bg[0]},{bg[1]},{bg[2]}"
+
+    timeline_data: dict[str, Any] = {
+        "keyframes": [str(path.relative_to(input_dir)) if not path.is_absolute() else str(path) for path in keyframes],
+        "defaults": {
+            "frames": base.frames,
+            "easing": base.easing,
+            "interpolation": base.interpolation,
+            "alpha_blend": base.alpha_blend,
+            "spline_tension": base.spline_tension,
+            "spline_bias": base.spline_bias,
+            "spline_continuity": base.spline_continuity,
+            "spline_endpoint": base.spline_endpoint,
+        },
+        "segments": [_segment_to_json_dict(segment) for segment in segments],
+    }
+    if render_hints:
+        timeline_data["render_hints"] = render_hints
+
+    if output_path.exists() and not args.overwrite:
+        raise RuntimeError(f"Refusing to overwrite existing file: {output_path}. Use --overwrite to replace it.")
+
+    output_path.write_text(json.dumps(timeline_data, indent=2), encoding="utf-8")
+
+    schema_path = Path(args.schema)
+    if schema_path.exists():
+        schema_errors = _validate_timeline_schema(output_path, schema_path)
+        if schema_errors:
+            print(f"Wrote {output_path}, but schema validation failed ({len(schema_errors)} errors):")
+            for error in schema_errors:
+                print(f" - {error}")
+            raise SystemExit(2)
+
+    print(f"Wrote timeline via compose command to {output_path}")
+    print(f" - Keyframes: {len(keyframes)}")
+    print(f" - Segments: {len(segments)}")
+    print(f" - Estimated frames: {total_frames}")
+    print(f" - Estimated RGBA buffer: {approx_gib:.2f} GiB")
+    if warnings:
+        print(f" - Warnings: {len(warnings)}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -706,6 +1374,70 @@ def parse_args() -> argparse.Namespace:
 
     cmd_template = subparsers.add_parser("write-timeline-template", help="Write a starter JSON timeline file.")
     cmd_template.add_argument("--output", default="timeline.example.json")
+
+    cmd_validate = subparsers.add_parser(
+        "validate-timeline",
+        help="Validate a timeline against JSON schema and runtime rules.",
+    )
+    cmd_validate.add_argument("--timeline", required=True, help="Path to timeline JSON file.")
+    cmd_validate.add_argument("--schema", default="timeline.schema.json", help="Path to timeline JSON schema.")
+    cmd_validate.add_argument("--input-dir", default="assets/test_images")
+    _add_timeline_resolution_defaults(cmd_validate)
+
+    cmd_doctor = subparsers.add_parser(
+        "timeline-doctor",
+        help="Show timeline diagnostics, resolved segment settings, and risk warnings.",
+    )
+    cmd_doctor.add_argument("--timeline", required=True, help="Path to timeline JSON file.")
+    cmd_doctor.add_argument("--schema", default="timeline.schema.json", help="Path to timeline JSON schema.")
+    cmd_doctor.add_argument("--input-dir", default="assets/test_images")
+    _add_timeline_resolution_defaults(cmd_doctor)
+
+    cmd_wizard = subparsers.add_parser(
+        "timeline-wizard",
+        help="Interactive wizard for creating or updating timeline JSON files.",
+    )
+    cmd_wizard.add_argument("--input-dir", default="assets/test_images")
+    cmd_wizard.add_argument("--output", default=None, help="Optional default output path shown in prompts.")
+    cmd_wizard.add_argument("--schema", default="timeline.schema.json")
+    cmd_wizard.add_argument("--fps", type=int, default=24)
+
+    cmd_compose = subparsers.add_parser(
+        "timeline-compose",
+        help="Non-interactive timeline creation command for scripts/automation.",
+    )
+    cmd_compose.add_argument("--input-dir", default="assets/test_images")
+    cmd_compose.add_argument("--output", required=True)
+    cmd_compose.add_argument("--schema", default="timeline.schema.json")
+    cmd_compose.add_argument(
+        "--keyframes",
+        default=None,
+        help="Comma-separated keyframe selectors. Use 1-based indices or filenames/paths.",
+    )
+    cmd_compose.add_argument(
+        "--preset",
+        default="cinematic-smooth",
+        choices=sorted(WIZARD_PRESETS.keys()),
+    )
+    cmd_compose.add_argument("--frames-per-segment", type=int, default=None)
+    cmd_compose.add_argument(
+        "--easing",
+        default="ease-in-out",
+        choices=["linear", "ease-in", "ease-out", "ease-in-out", "smoothstep", "smootherstep"],
+    )
+    cmd_compose.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
+    cmd_compose.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
+    cmd_compose.add_argument("--fps", type=int, default=24)
+    _add_spline_control_args(cmd_compose)
+    _add_chroma_args(cmd_compose)
+    _add_mp4_output_args(cmd_compose)
+    cmd_compose.add_argument(
+        "--segment-overrides-file",
+        default=None,
+        help="JSON file with per-segment overrides, entries containing 1-based 'index'.",
+    )
+    cmd_compose.add_argument("--overwrite", action="store_true")
+    cmd_compose.add_argument("--allow-risky", action="store_true")
 
     return parser.parse_args()
 
@@ -792,6 +1524,12 @@ def main() -> None:
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
         mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
+        if timeline_path is not None:
+            hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
+            if chroma_key is None:
+                chroma_key = hint_chroma
+            if mp4_background is None:
+                mp4_background = hint_bg
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
@@ -810,6 +1548,9 @@ def main() -> None:
         timeline_path = Path(args.timeline) if args.timeline else None
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
+        if timeline_path is not None and chroma_key is None:
+            hint_chroma, _ = _load_render_hints_from_timeline(timeline_path)
+            chroma_key = hint_chroma
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
@@ -824,6 +1565,102 @@ def main() -> None:
         output_path = Path(args.output)
         output_path.write_text(json.dumps(_timeline_template(), indent=2), encoding="utf-8")
         print(f"Wrote timeline template to {output_path}")
+        return
+
+    if args.command == "validate-timeline":
+        timeline_path = Path(args.timeline)
+        schema_path = Path(args.schema)
+        schema_errors = _validate_timeline_schema(timeline_path=timeline_path, schema_path=schema_path)
+
+        if schema_errors:
+            print(f"Schema validation failed ({len(schema_errors)} errors):")
+            for error in schema_errors:
+                print(f" - {error}")
+            raise SystemExit(2)
+
+        default_spec = _default_segment_spec_from_args(args)
+        image_paths, segments = _resolve_image_paths_and_segments(
+            input_dir=Path(args.input_dir),
+            timeline_path=timeline_path,
+            default_spec=default_spec,
+            fps=args.fps,
+        )
+        _load_render_hints_from_timeline(timeline_path)
+        total_frames = sum(segment.frames for segment in segments) + 1
+        print("Timeline validation passed.")
+        print(f" - Keyframes: {len(image_paths)}")
+        print(f" - Segments: {len(segments)}")
+        print(f" - Estimated frames: {total_frames}")
+        return
+
+    if args.command == "timeline-doctor":
+        timeline_path = Path(args.timeline)
+        schema_path = Path(args.schema)
+        schema_errors = _validate_timeline_schema(timeline_path=timeline_path, schema_path=schema_path)
+
+        default_spec = _default_segment_spec_from_args(args)
+        image_paths, segments = _resolve_image_paths_and_segments(
+            input_dir=Path(args.input_dir),
+            timeline_path=timeline_path,
+            default_spec=default_spec,
+            fps=args.fps,
+        )
+
+        warnings, max_size, approx_gib, total_frames = _timeline_doctor_warnings(
+            image_paths=image_paths,
+            segments=segments,
+            fps=args.fps,
+        )
+        hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
+
+        print("Timeline doctor report")
+        print(f" - keyframes: {len(image_paths)}")
+        print(f" - segments: {len(segments)}")
+        print(f" - estimated frames: {total_frames}")
+        if args.fps > 0:
+            print(f" - estimated duration: {total_frames / args.fps:.2f}s at {args.fps} fps")
+        print(f" - largest keyframe: {max_size[0]}x{max_size[1]}")
+        print(f" - estimated RGBA buffer: {approx_gib:.2f} GiB")
+        print(f" - render hint chroma: {'set' if hint_chroma else 'none'}")
+        print(f" - render hint mp4 background: {hint_bg if hint_bg else 'none'}")
+
+        print("Resolved segments")
+        for idx, segment in enumerate(segments):
+            print(
+                " - "
+                f"{idx}: frames={segment.frames}, easing={segment.easing}, "
+                f"interp={segment.interpolation}, alpha={segment.alpha_blend}, "
+                f"tension={segment.spline_tension}, bias={segment.spline_bias}, "
+                f"continuity={segment.spline_continuity}, endpoint={segment.spline_endpoint}"
+            )
+
+        if schema_errors:
+            print(f"Schema issues ({len(schema_errors)}):")
+            for error in schema_errors:
+                print(f" - {error}")
+
+        if warnings:
+            print(f"Warnings ({len(warnings)}):")
+            for warning in warnings:
+                print(f" - {warning}")
+        else:
+            print("Warnings (0): none")
+        return
+
+    if args.command == "timeline-wizard":
+        try:
+            _run_timeline_wizard(args)
+        except RuntimeError as exc:
+            print(str(exc))
+            raise SystemExit(1) from exc
+        return
+
+    if args.command == "timeline-compose":
+        try:
+            _run_timeline_compose(args)
+        except RuntimeError as exc:
+            print(str(exc))
+            raise SystemExit(1) from exc
         return
 
     raise RuntimeError("Unknown command")

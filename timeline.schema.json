@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/spline_animator/timeline.schema.json",
+  "title": "Spline Animator Timeline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["keyframes"],
+  "properties": {
+    "keyframes": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "defaults": {
+      "$ref": "#/$defs/segmentDefaults"
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "render_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chroma_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chroma_threshold": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mp4_background": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "scalarControls": {
+      "type": "object",
+      "properties": {
+        "easing": {
+          "type": "string",
+          "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "smoothstep", "smootherstep"]
+        },
+        "interpolation": {
+          "type": "string",
+          "enum": ["catmull-rom", "linear"]
+        },
+        "alpha_blend": {
+          "type": "string",
+          "enum": ["straight", "premultiplied"]
+        },
+        "spline_tension": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "spline_bias": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "spline_continuity": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "spline_endpoint": {
+          "type": "string",
+          "enum": ["clamp", "mirror", "wrap"]
+        },
+        "tension": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "bias": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "continuity": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "endpoint": {
+          "type": "string",
+          "enum": ["clamp", "mirror", "wrap"]
+        }
+      }
+    },
+    "segmentDefaults": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/scalarControls"
+        },
+        {
+          "properties": {
+            "frames": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "segment": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/scalarControls"
+        },
+        {
+          "properties": {
+            "frames": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "duration_frames": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "duration_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

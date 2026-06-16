@@ -1,0 +1,14 @@
+[
+  {
+    "index": 2,
+    "duration_frames": 12,
+    "easing": "ease-in",
+    "interpolation": "linear"
+  },
+  {
+    "index": 3,
+    "duration_seconds": 1.2,
+    "spline_tension": 0.3,
+    "spline_endpoint": "wrap"
+  }
+]

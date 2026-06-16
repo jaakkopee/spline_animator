@@ -1,0 +1,55 @@
+{
+  "keyframes": [
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png"
+  ],
+  "defaults": {
+    "frames": 24,
+    "easing": "ease-in-out",
+    "interpolation": "catmull-rom",
+    "alpha_blend": "premultiplied",
+    "spline_tension": 0.0,
+    "spline_bias": 0.0,
+    "spline_continuity": 0.0,
+    "spline_endpoint": "clamp"
+  },
+  "segments": [
+    {
+      "duration_frames": 24,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.0,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "duration_frames": 12,
+      "easing": "ease-in",
+      "interpolation": "linear",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.0,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "duration_frames": 29,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.3,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "wrap"
+    }
+  ],
+  "render_hints": {
+    "chroma_key": "0,0,0",
+    "chroma_threshold": 12.0,
+    "mp4_background": "8,12,24"
+  }
+}

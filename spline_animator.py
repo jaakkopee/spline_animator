@@ -45,6 +45,63 @@ class SegmentSpec:
     spline_endpoint: str = "clamp"
 
 
+class WitchyNarrator:
+    """Friendly progress narrator for long-running loops."""
+
+    _MILESTONES = [0, 10, 25, 40, 55, 70, 85, 100]
+    _MILESTONE_LINES = {
+        0: "[witch] The candles are lit. The ritual begins.",
+        10: "[witch] A tiny spark dances in the cauldron.",
+        25: "[witch] The runes hum softly. Progress is gathering.",
+        40: "[witch] Moonlight catches the spell threads.",
+        55: "[witch] Halfway and humming. The familiars approve.",
+        70: "[witch] The potion thickens with shimmering frames.",
+        85: "[witch] Almost there. Starlight is syncing nicely.",
+        100: "[witch] Poof. The enchantment is complete.",
+    }
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self._total = 1
+        self._milestone_index = 0
+
+    def begin(self, ritual: str, total: int) -> None:
+        if not self.enabled:
+            return
+        self._total = max(1, total)
+        self._milestone_index = 0
+        print(f"[witch] {ritual}: {total} steps in this spell.")
+        self._emit_reached_milestones(0)
+
+    def segment(self, index: int, total_segments: int, spec: SegmentSpec) -> None:
+        if not self.enabled:
+            return
+        print(
+            "[witch] "
+            f"Weaving segment {index}/{total_segments} "
+            f"(frames={spec.frames}, easing={spec.easing}, interpolation={spec.interpolation})."
+        )
+
+    def tick(self, completed_steps: int) -> None:
+        if not self.enabled:
+            return
+        pct = int((completed_steps * 100) / self._total)
+        self._emit_reached_milestones(pct)
+
+    def note(self, text: str) -> None:
+        if not self.enabled:
+            return
+        print(f"[witch] {text}")
+
+    def _emit_reached_milestones(self, pct: int) -> None:
+        while self._milestone_index < len(self._MILESTONES):
+            milestone = self._MILESTONES[self._milestone_index]
+            if pct < milestone:
+                break
+            print(self._MILESTONE_LINES[milestone])
+            self._milestone_index += 1
+
+
 WIZARD_PRESETS: dict[str, SegmentSpec] = {
     "cinematic-smooth": SegmentSpec(
         frames=32,
@@ -332,6 +389,7 @@ class SplineAnimator:
         self,
         segments: list[SegmentSpec],
         chroma_key: ChromaKeySpec | None = None,
+        narrator: WitchyNarrator | None = None,
     ) -> list[np.ndarray]:
         if len(segments) != len(self.keyframes) - 1:
             raise ValueError("Number of segment specs must match number of keyframe transitions.")
@@ -339,15 +397,28 @@ class SplineAnimator:
             raise ValueError("Each segment must have at least one frame.")
 
         frames: list[np.ndarray] = []
+        done_steps = 0
+        total_steps = sum(spec.frames for spec in segments) + 1
+        if narrator is not None:
+            narrator.begin("Brewing interpolated frames", total_steps)
+
         for i, spec in enumerate(segments):
+            if narrator is not None:
+                narrator.segment(i + 1, len(segments), spec)
             for step in range(spec.frames):
                 t = step / spec.frames
                 frame = self._interpolate_segment_frame(i, t, spec)
                 frame_u8 = np.clip(frame, 0, 255).astype(np.uint8)
                 frames.append(self._apply_chroma_key(frame_u8, chroma_key))
+                done_steps += 1
+                if narrator is not None:
+                    narrator.tick(done_steps)
 
         final_frame = np.clip(self.keyframes[-1], 0, 255).astype(np.uint8)
         frames.append(self._apply_chroma_key(final_frame, chroma_key))
+        done_steps += 1
+        if narrator is not None:
+            narrator.tick(done_steps)
         return frames
 
     def export_frames(
@@ -355,15 +426,20 @@ class SplineAnimator:
         output_dir: Path,
         segments: list[SegmentSpec],
         chroma_key: ChromaKeySpec | None = None,
+        narrator: WitchyNarrator | None = None,
     ) -> list[Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        frames = self.interpolated_frames(segments, chroma_key=chroma_key)
+        frames = self.interpolated_frames(segments, chroma_key=chroma_key, narrator=narrator)
 
         written: list[Path] = []
+        if narrator is not None:
+            narrator.begin("Bottling PNG frame phials", len(frames))
         for idx, frame in enumerate(frames):
             path = output_dir / f"frame_{idx:04d}.png"
             Image.fromarray(frame, mode="RGBA").save(path)
             written.append(path)
+            if narrator is not None:
+                narrator.tick(idx + 1)
         return written
 
     def render_video(
@@ -372,12 +448,15 @@ class SplineAnimator:
         config: RenderConfig,
         segments: list[SegmentSpec],
         chroma_key: ChromaKeySpec | None = None,
+        narrator: WitchyNarrator | None = None,
     ) -> None:
-        frames = self.interpolated_frames(segments, chroma_key=chroma_key)
+        frames = self.interpolated_frames(segments, chroma_key=chroma_key, narrator=narrator)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         suffix = output_path.suffix.lower()
         if suffix == ".gif":
+            if narrator is not None:
+                narrator.note("Sealing the animation into a GIF charm.")
             iio.imwrite(output_path, frames, format="GIF", duration=1.0 / config.fps, loop=0)
             return
 
@@ -385,7 +464,15 @@ class SplineAnimator:
             if config.mp4_background is None:
                 rgb_frames = [frame[..., :3] for frame in frames]
             else:
-                rgb_frames = [self._composite_over_background(frame, config.mp4_background) for frame in frames]
+                rgb_frames = []
+                if narrator is not None:
+                    narrator.begin("Compositing frames over MP4 background", len(frames))
+                for idx, frame in enumerate(frames):
+                    rgb_frames.append(self._composite_over_background(frame, config.mp4_background))
+                    if narrator is not None:
+                        narrator.tick(idx + 1)
+            if narrator is not None:
+                narrator.note("Binding the spell into an MP4 crystal.")
             iio.imwrite(output_path, rgb_frames, fps=config.fps, codec="libx264")
             return
 
@@ -1352,6 +1439,7 @@ def parse_args() -> argparse.Namespace:
     cmd_render.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
     cmd_render.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
     cmd_render.add_argument("--fps", type=int, default=24)
+    cmd_render.add_argument("--quiet", action="store_true", help="Disable witchy progress narration.")
     _add_chroma_args(cmd_render)
     _add_mp4_output_args(cmd_render)
     _add_spline_control_args(cmd_render)
@@ -1369,6 +1457,7 @@ def parse_args() -> argparse.Namespace:
     cmd_export.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
     cmd_export.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
     cmd_export.add_argument("--fps", type=int, default=24)
+    cmd_export.add_argument("--quiet", action="store_true", help="Disable witchy progress narration.")
     _add_chroma_args(cmd_export)
     _add_spline_control_args(cmd_export)
 
@@ -1524,6 +1613,7 @@ def main() -> None:
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
         mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
+        narrator = WitchyNarrator(enabled=not args.quiet)
         if timeline_path is not None:
             hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
             if chroma_key is None:
@@ -1538,7 +1628,7 @@ def main() -> None:
         )
         config = RenderConfig(fps=args.fps, mp4_background=mp4_background)
         output_path = Path(args.output)
-        animator.render_video(output_path, config, segments, chroma_key=chroma_key)
+        animator.render_video(output_path, config, segments, chroma_key=chroma_key, narrator=narrator)
 
         estimated_frames = sum(spec.frames for spec in segments) + 1
         print(f"Rendered {estimated_frames} frames to {output_path}")
@@ -1548,6 +1638,7 @@ def main() -> None:
         timeline_path = Path(args.timeline) if args.timeline else None
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
+        narrator = WitchyNarrator(enabled=not args.quiet)
         if timeline_path is not None and chroma_key is None:
             hint_chroma, _ = _load_render_hints_from_timeline(timeline_path)
             chroma_key = hint_chroma
@@ -1557,7 +1648,12 @@ def main() -> None:
             default_spec=default_spec,
             fps=args.fps,
         )
-        written = animator.export_frames(Path(args.output_dir), segments, chroma_key=chroma_key)
+        written = animator.export_frames(
+            Path(args.output_dir),
+            segments,
+            chroma_key=chroma_key,
+            narrator=narrator,
+        )
         print(f"Wrote {len(written)} interpolated frames to {args.output_dir}")
         return
 

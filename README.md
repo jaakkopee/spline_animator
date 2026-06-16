@@ -36,6 +36,9 @@ spline-animator render \
   --fps 24
 ```
 
+During `render` and `export-frames`, the app prints cute witchy progress commentary for long loops.
+Use `--quiet` to silence it.
+
 Render with easing and alpha-aware blending options:
 
 ```bash
@@ -79,7 +82,8 @@ spline-animator export-frames \
   --output-dir artifacts/frames \
   --frames-per-segment 20 \
   --chroma-key '#000000' \
-  --chroma-threshold 16
+  --chroma-threshold 16 \
+  --quiet
 ```
 
 Write a timeline template and render from JSON timeline:

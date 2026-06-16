@@ -45,6 +45,10 @@ spline-animator render \
   --frames-per-segment 24 \
   --easing smoothstep \
   --interpolation catmull-rom \
+  --spline-tension 0.15 \
+  --spline-bias 0.0 \
+  --spline-continuity 0.0 \
+  --spline-endpoint clamp \
   --alpha-blend premultiplied \
   --chroma-key 0,0,0 \
   --chroma-threshold 18 \
@@ -60,6 +64,8 @@ spline-animator render \
   --frames-per-segment 64 \
   --easing ease-in-out \
   --interpolation catmull-rom \
+  --spline-tension 0.25 \
+  --spline-endpoint mirror \
   --chroma-key 0,0,0 \
   --chroma-threshold 128 \
   --mp4-background 8,12,24
@@ -103,7 +109,11 @@ Timeline lets you define keyframe order, per-segment duration, easing, interpola
     "frames": 20,
     "easing": "smoothstep",
     "interpolation": "catmull-rom",
-    "alpha_blend": "premultiplied"
+    "alpha_blend": "premultiplied",
+    "spline_tension": 0.1,
+    "spline_bias": 0.0,
+    "spline_continuity": -0.1,
+    "spline_endpoint": "mirror"
   },
   "segments": [
     {
@@ -114,11 +124,19 @@ Timeline lets you define keyframe order, per-segment duration, easing, interpola
     {
       "duration_seconds": 1.0,
       "easing": "ease-out",
-      "alpha_blend": "straight"
+      "alpha_blend": "straight",
+      "spline_tension": 0.25,
+      "spline_continuity": 0.1,
+      "spline_endpoint": "wrap"
     }
   ]
 }
 ```
+
+Timeline spline fields:
+- `spline_tension`, `spline_bias`, `spline_continuity` in `[-1, 1]`
+- `spline_endpoint` in `{clamp, mirror, wrap}`
+- You can place these in `defaults` and override per entry in `segments`.
 
 Supported easing values:
 - `linear`
@@ -131,6 +149,35 @@ Supported easing values:
 Supported interpolation values:
 - `catmull-rom`
 - `linear`
+
+Spline shape controls (for `catmull-rom` interpolation):
+- `--spline-tension` in `[-1, 1]`
+- `--spline-bias` in `[-1, 1]`
+- `--spline-continuity` in `[-1, 1]`
+- `--spline-endpoint` in `{clamp, mirror, wrap}`
+
+How these affect motion:
+- `tension`:
+  - `0.0` is classic Catmull-Rom.
+  - Higher values (e.g. `0.2..0.6`) tighten curves and reduce overshoot.
+  - Lower values (e.g. negative) make arcs looser and can increase overshoot.
+- `bias`:
+  - Positive values bias movement toward the incoming side of each keyframe.
+  - Negative values bias movement toward the outgoing side.
+  - `0.0` is symmetric.
+- `continuity`:
+  - Positive values make transitions sharper at keyframes.
+  - Negative values smooth them out.
+  - `0.0` is neutral.
+- `endpoint`:
+  - `clamp`: duplicates edge points (stable default).
+  - `mirror`: reflects edge tangents, often smoother starts/ends.
+  - `wrap`: treats sequence as looped (good for cyclic animations).
+
+Starter presets:
+- Stable/noisy-data friendly: `--spline-tension 0.35 --spline-bias 0 --spline-continuity 0 --spline-endpoint clamp`
+- Smooth cinematic: `--spline-tension 0.1 --spline-bias 0 --spline-continuity -0.15 --spline-endpoint mirror`
+- Looped motion: `--spline-tension 0 --spline-bias 0 --spline-continuity 0 --spline-endpoint wrap`
 
 Supported alpha blending values:
 - `premultiplied` (recommended for translucent assets)

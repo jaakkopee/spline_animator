@@ -9,7 +9,11 @@
     "frames": 20,
     "easing": "smoothstep",
     "interpolation": "catmull-rom",
-    "alpha_blend": "premultiplied"
+    "alpha_blend": "premultiplied",
+    "spline_tension": 0.1,
+    "spline_bias": 0.0,
+    "spline_continuity": -0.1,
+    "spline_endpoint": "mirror"
   },
   "segments": [
     {
@@ -20,12 +24,15 @@
     {
       "duration_frames": 24,
       "easing": "ease-in-out",
-      "interpolation": "catmull-rom"
+      "interpolation": "catmull-rom",
+      "spline_tension": 0.25,
+      "spline_continuity": 0.1
     },
     {
       "duration_seconds": 1.4,
       "easing": "ease-out",
-      "alpha_blend": "straight"
+      "alpha_blend": "straight",
+      "spline_endpoint": "wrap"
     }
   ]
 }

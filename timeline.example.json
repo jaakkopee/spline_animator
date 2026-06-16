@@ -1,0 +1,31 @@
+{
+  "keyframes": [
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png"
+  ],
+  "defaults": {
+    "frames": 20,
+    "easing": "smoothstep",
+    "interpolation": "catmull-rom",
+    "alpha_blend": "premultiplied"
+  },
+  "segments": [
+    {
+      "duration_frames": 12,
+      "easing": "ease-in",
+      "interpolation": "linear"
+    },
+    {
+      "duration_frames": 24,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom"
+    },
+    {
+      "duration_seconds": 1.4,
+      "easing": "ease-out",
+      "alpha_blend": "straight"
+    }
+  ]
+}

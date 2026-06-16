@@ -46,6 +46,8 @@ spline-animator render \
   --easing smoothstep \
   --interpolation catmull-rom \
   --alpha-blend premultiplied \
+  --chroma-key 0,0,0 \
+  --chroma-threshold 18 \
   --fps 24
 ```
 
@@ -55,7 +57,9 @@ Export interpolated frames for inspection:
 spline-animator export-frames \
   --input-dir assets/test_images \
   --output-dir artifacts/frames \
-  --frames-per-segment 20
+  --frames-per-segment 20 \
+  --chroma-key '#000000' \
+  --chroma-threshold 16
 ```
 
 Write a timeline template and render from JSON timeline:
@@ -117,6 +121,10 @@ Supported interpolation values:
 Supported alpha blending values:
 - `premultiplied` (recommended for translucent assets)
 - `straight`
+
+Chroma key options:
+- `--chroma-key`: color to make transparent, format `R,G,B` or `#RRGGBB`
+- `--chroma-threshold`: RGB distance threshold (default `0.0`, exact match)
 
 ## Notes
 

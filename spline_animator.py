@@ -19,6 +19,12 @@ class RenderConfig:
 
 
 @dataclass
+class ChromaKeySpec:
+    color: tuple[int, int, int]
+    threshold: float = 0.0
+
+
+@dataclass
 class SegmentSpec:
     frames: int
     easing: str = "linear"
@@ -97,6 +103,20 @@ class SplineAnimator:
     def _normalize_alpha_blend(name: str) -> str:
         return name.strip().lower().replace("_", "-")
 
+    @staticmethod
+    def _apply_chroma_key(frame: np.ndarray, chroma_key: ChromaKeySpec | None) -> np.ndarray:
+        if chroma_key is None:
+            return frame
+
+        key_rgb = np.array(chroma_key.color, dtype=np.float32)
+        rgb = frame[..., :3].astype(np.float32)
+        dist = np.linalg.norm(rgb - key_rgb, axis=-1)
+        mask = dist <= float(chroma_key.threshold)
+
+        output = frame.copy()
+        output[..., 3] = np.where(mask, 0, output[..., 3])
+        return output
+
     @classmethod
     def _apply_easing(cls, t: float, easing: str) -> float:
         e = cls._normalize_easing(easing)
@@ -158,7 +178,11 @@ class SplineAnimator:
             frame = self._from_premultiplied(frame)
         return frame
 
-    def interpolated_frames(self, segments: list[SegmentSpec]) -> list[np.ndarray]:
+    def interpolated_frames(
+        self,
+        segments: list[SegmentSpec],
+        chroma_key: ChromaKeySpec | None = None,
+    ) -> list[np.ndarray]:
         if len(segments) != len(self.keyframes) - 1:
             raise ValueError("Number of segment specs must match number of keyframe transitions.")
         if any(spec.frames < 1 for spec in segments):
@@ -169,14 +193,21 @@ class SplineAnimator:
             for step in range(spec.frames):
                 t = step / spec.frames
                 frame = self._interpolate_segment_frame(i, t, spec)
-                frames.append(np.clip(frame, 0, 255).astype(np.uint8))
+                frame_u8 = np.clip(frame, 0, 255).astype(np.uint8)
+                frames.append(self._apply_chroma_key(frame_u8, chroma_key))
 
-        frames.append(np.clip(self.keyframes[-1], 0, 255).astype(np.uint8))
+        final_frame = np.clip(self.keyframes[-1], 0, 255).astype(np.uint8)
+        frames.append(self._apply_chroma_key(final_frame, chroma_key))
         return frames
 
-    def export_frames(self, output_dir: Path, segments: list[SegmentSpec]) -> list[Path]:
+    def export_frames(
+        self,
+        output_dir: Path,
+        segments: list[SegmentSpec],
+        chroma_key: ChromaKeySpec | None = None,
+    ) -> list[Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        frames = self.interpolated_frames(segments)
+        frames = self.interpolated_frames(segments, chroma_key=chroma_key)
 
         written: list[Path] = []
         for idx, frame in enumerate(frames):
@@ -185,8 +216,14 @@ class SplineAnimator:
             written.append(path)
         return written
 
-    def render_video(self, output_path: Path, config: RenderConfig, segments: list[SegmentSpec]) -> None:
-        frames = self.interpolated_frames(segments)
+    def render_video(
+        self,
+        output_path: Path,
+        config: RenderConfig,
+        segments: list[SegmentSpec],
+        chroma_key: ChromaKeySpec | None = None,
+    ) -> None:
+        frames = self.interpolated_frames(segments, chroma_key=chroma_key)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         suffix = output_path.suffix.lower()
@@ -212,6 +249,56 @@ def _default_segment_spec_from_args(args: argparse.Namespace) -> SegmentSpec:
         easing=args.easing,
         interpolation=args.interpolation,
         alpha_blend=args.alpha_blend,
+    )
+
+
+def _parse_rgb_color(value: str) -> tuple[int, int, int]:
+    text = value.strip()
+    if text.startswith("#"):
+        hex_value = text[1:]
+        if len(hex_value) != 6:
+            raise ValueError("Hex chroma key must be in #RRGGBB format.")
+        try:
+            return tuple(int(hex_value[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+        except ValueError as exc:
+            raise ValueError("Invalid hex chroma key value.") from exc
+
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 3:
+        raise ValueError("Chroma key color must be R,G,B or #RRGGBB.")
+
+    try:
+        rgb = tuple(int(p) for p in parts)
+    except ValueError as exc:
+        raise ValueError("Chroma key RGB channels must be integers.") from exc
+
+    if any(ch < 0 or ch > 255 for ch in rgb):
+        raise ValueError("Chroma key RGB channels must be in range 0-255.")
+    return rgb  # type: ignore[return-value]
+
+
+def _chroma_key_from_args(args: argparse.Namespace) -> ChromaKeySpec | None:
+    raw = getattr(args, "chroma_key", None)
+    if not raw:
+        return None
+    color = _parse_rgb_color(raw)
+    threshold = float(getattr(args, "chroma_threshold", 0.0))
+    if threshold < 0:
+        raise ValueError("chroma-threshold must be >= 0")
+    return ChromaKeySpec(color=color, threshold=threshold)
+
+
+def _add_chroma_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--chroma-key",
+        default=None,
+        help="Set pixels near this color transparent. Format: R,G,B or #RRGGBB",
+    )
+    parser.add_argument(
+        "--chroma-threshold",
+        type=float,
+        default=0.0,
+        help="Euclidean RGB distance threshold for chroma keying.",
     )
 
 
@@ -378,6 +465,7 @@ def parse_args() -> argparse.Namespace:
     cmd_render.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
     cmd_render.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
     cmd_render.add_argument("--fps", type=int, default=24)
+    _add_chroma_args(cmd_render)
 
     cmd_export = subparsers.add_parser("export-frames", help="Export interpolated frames as PNG files.")
     cmd_export.add_argument("--input-dir", default="assets/test_images")
@@ -392,6 +480,7 @@ def parse_args() -> argparse.Namespace:
     cmd_export.add_argument("--interpolation", default="catmull-rom", choices=["catmull-rom", "linear"])
     cmd_export.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
     cmd_export.add_argument("--fps", type=int, default=24)
+    _add_chroma_args(cmd_export)
 
     cmd_template = subparsers.add_parser("write-timeline-template", help="Write a starter JSON timeline file.")
     cmd_template.add_argument("--output", default="timeline.example.json")
@@ -458,6 +547,7 @@ def main() -> None:
     if args.command == "render":
         timeline_path = Path(args.timeline) if args.timeline else None
         default_spec = _default_segment_spec_from_args(args)
+        chroma_key = _chroma_key_from_args(args)
         animator, image_paths, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
@@ -466,7 +556,7 @@ def main() -> None:
         )
         config = RenderConfig(fps=args.fps)
         output_path = Path(args.output)
-        animator.render_video(output_path, config, segments)
+        animator.render_video(output_path, config, segments, chroma_key=chroma_key)
 
         estimated_frames = sum(spec.frames for spec in segments) + 1
         print(f"Rendered {estimated_frames} frames to {output_path}")
@@ -475,13 +565,14 @@ def main() -> None:
     if args.command == "export-frames":
         timeline_path = Path(args.timeline) if args.timeline else None
         default_spec = _default_segment_spec_from_args(args)
+        chroma_key = _chroma_key_from_args(args)
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
             default_spec=default_spec,
             fps=args.fps,
         )
-        written = animator.export_frames(Path(args.output_dir), segments)
+        written = animator.export_frames(Path(args.output_dir), segments, chroma_key=chroma_key)
         print(f"Wrote {len(written)} interpolated frames to {args.output_dir}")
         return
 

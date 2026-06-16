@@ -61,7 +61,8 @@ spline-animator render \
   --easing ease-in-out \
   --interpolation catmull-rom \
   --chroma-key 0,0,0 \
-  --chroma-threshold 128
+  --chroma-threshold 128 \
+  --mp4-background 8,12,24
 ```
 
 Export interpolated frames for inspection:
@@ -139,10 +140,13 @@ Chroma key options:
 - `--chroma-key`: color to make transparent, format `R,G,B` or `#RRGGBB`
 - `--chroma-threshold`: RGB distance threshold (default `0.0`, exact match). Larger values remove a wider color neighborhood.
 
+MP4 output options:
+- `--mp4-background`: color used to composite transparent pixels before MP4 encoding, format `R,G,B` or `#RRGGBB`.
+
 Important output note:
 - PNG frame export preserves alpha.
 - GIF supports transparency in palette-based form.
-- MP4 output is RGB only (alpha is discarded by codec/container), so keyed-out areas appear against the RGB content that remains.
+- MP4 output is RGB only (alpha is discarded by codec/container), so use `--mp4-background` if you want transparent areas to become a specific visible color.
 
 ## Notes
 

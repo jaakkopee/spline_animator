@@ -16,6 +16,7 @@ from birth_of_the_four_classical_elements import generate_test_images
 @dataclass
 class RenderConfig:
     fps: int = 24
+    mp4_background: tuple[int, int, int] | None = None
 
 
 @dataclass
@@ -116,6 +117,14 @@ class SplineAnimator:
         output = frame.copy()
         output[..., 3] = np.where(mask, 0, output[..., 3])
         return output
+
+    @staticmethod
+    def _composite_over_background(frame: np.ndarray, background: tuple[int, int, int]) -> np.ndarray:
+        rgb = frame[..., :3].astype(np.float32)
+        alpha = frame[..., 3:4].astype(np.float32) / 255.0
+        bg = np.array(background, dtype=np.float32).reshape((1, 1, 3))
+        composite = rgb * alpha + bg * (1.0 - alpha)
+        return np.clip(composite, 0, 255).astype(np.uint8)
 
     @classmethod
     def _apply_easing(cls, t: float, easing: str) -> float:
@@ -232,7 +241,10 @@ class SplineAnimator:
             return
 
         if suffix == ".mp4":
-            rgb_frames = [frame[..., :3] for frame in frames]
+            if config.mp4_background is None:
+                rgb_frames = [frame[..., :3] for frame in frames]
+            else:
+                rgb_frames = [self._composite_over_background(frame, config.mp4_background) for frame in frames]
             iio.imwrite(output_path, rgb_frames, fps=config.fps, codec="libx264")
             return
 
@@ -299,6 +311,14 @@ def _add_chroma_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=0.0,
         help="Euclidean RGB distance threshold for chroma keying.",
+    )
+
+
+def _add_mp4_output_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--mp4-background",
+        default=None,
+        help="Composite RGBA over this color for MP4 output. Format: R,G,B or #RRGGBB",
     )
 
 
@@ -466,6 +486,7 @@ def parse_args() -> argparse.Namespace:
     cmd_render.add_argument("--alpha-blend", default="premultiplied", choices=["straight", "premultiplied"])
     cmd_render.add_argument("--fps", type=int, default=24)
     _add_chroma_args(cmd_render)
+    _add_mp4_output_args(cmd_render)
 
     cmd_export = subparsers.add_parser("export-frames", help="Export interpolated frames as PNG files.")
     cmd_export.add_argument("--input-dir", default="assets/test_images")
@@ -548,13 +569,14 @@ def main() -> None:
         timeline_path = Path(args.timeline) if args.timeline else None
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
+        mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
         animator, image_paths, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
             default_spec=default_spec,
             fps=args.fps,
         )
-        config = RenderConfig(fps=args.fps)
+        config = RenderConfig(fps=args.fps, mp4_background=mp4_background)
         output_path = Path(args.output)
         animator.render_video(output_path, config, segments, chroma_key=chroma_key)
 

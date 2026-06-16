@@ -51,6 +51,19 @@ spline-animator render \
   --fps 24
 ```
 
+Render an MP4 from a custom image folder with stronger chroma keying:
+
+```bash
+spline-animator render \
+  --input-dir ~/Documents/japipo_images \
+  --output ~/Documents/japipo_images/japiposes3.mp4 \
+  --frames-per-segment 64 \
+  --easing ease-in-out \
+  --interpolation catmull-rom \
+  --chroma-key 0,0,0 \
+  --chroma-threshold 128
+```
+
 Export interpolated frames for inspection:
 
 ```bash
@@ -124,7 +137,12 @@ Supported alpha blending values:
 
 Chroma key options:
 - `--chroma-key`: color to make transparent, format `R,G,B` or `#RRGGBB`
-- `--chroma-threshold`: RGB distance threshold (default `0.0`, exact match)
+- `--chroma-threshold`: RGB distance threshold (default `0.0`, exact match). Larger values remove a wider color neighborhood.
+
+Important output note:
+- PNG frame export preserves alpha.
+- GIF supports transparency in palette-based form.
+- MP4 output is RGB only (alpha is discarded by codec/container), so keyed-out areas appear against the RGB content that remains.
 
 ## Notes
 

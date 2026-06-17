@@ -1541,6 +1541,7 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
     min_frames = int(args.min_segment_frames)
     max_frames = int(args.max_segment_frames)
     pace = float(args.pace)
+    image_swap_speed = float(args.image_swap_speed)
 
     if fps < 1:
         raise ValueError("fps must be >= 1")
@@ -1550,6 +1551,8 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
         raise ValueError("max_segment_frames must be >= min_segment_frames")
     if pace <= 0:
         raise ValueError("pace must be > 0")
+    if image_swap_speed <= 0:
+        raise ValueError("image_swap_speed must be > 0")
 
     # Load and analyze audio
     features = load_and_analyze_audio(audio_path)
@@ -1574,6 +1577,7 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
         min_segment_frames=min_frames,
         max_segment_frames=max_frames,
         pace=pace,
+        image_swap_speed=image_swap_speed,
     )
 
     if pace != 1.0:
@@ -1605,10 +1609,23 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
     print(f" - Audio file: {audio_path}")
     print(f" - Audio duration: {features.duration_seconds:.2f}s")
     print(f" - Pace scale: {pace:.2f}x")
+    print(f" - Image swap speed: {image_swap_speed:.2f}x")
     print(f" - Keyframes: {num_keyframes}")
     print(f" - Segments: {num_segments}")
     print(f" - Estimated total frames: {total_frames}")
     print(f" - Estimated timeline duration: {duration_estimate:.2f}s at {fps} fps")
+    target_total_frames = max(2, int(round(features.duration_seconds * fps * pace)))
+    target_segment_frames = target_total_frames - 1
+    min_segments_needed = max(1, int(np.ceil(target_segment_frames / max_frames)))
+    max_segments_allowed = max(1, int(np.floor(target_segment_frames / min_frames)))
+    if image_swap_speed != 1.0 and (
+        num_segments == min_segments_needed or num_segments == max_segments_allowed
+    ):
+        print(" - Image swap speed constrained by min/max segment frame bounds")
+        print(
+            f"   Segment count range for current duration/fps/settings: "
+            f"{min_segments_needed}..{max_segments_allowed}"
+        )
     if features.duration_seconds > 0:
         ratio = duration_estimate / features.duration_seconds
         print(f" - Timeline/Audio duration ratio: {ratio:.3f}x")
@@ -1772,6 +1789,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Global segment length scale. 1.0 = audio duration, >1 slower/longer, <1 faster/shorter.",
+    )
+    cmd_audio.add_argument(
+        "--image-swap-speed",
+        type=float,
+        default=1.0,
+        help="Image transition cadence scale. >1 faster swaps, <1 slower swaps.",
     )
     cmd_audio.add_argument(
         "--analyze-only",

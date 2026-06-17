@@ -196,6 +196,7 @@ The audio-reactive system:
 - `--min-segment-frames`: Minimum frames per segment (default: 8)
 - `--max-segment-frames`: Maximum frames per segment (default: 64)
 - `--pace`: Global segment length scale (default: 1.0). `1.0` matches audio duration, `>1.0` slows down/extends timeline, `<1.0` speeds up/shortens timeline. When not `1.0`, an STFT-vocoder audio file is generated and referenced in `render_hints.audio_path`.
+- `--image-swap-speed`: Controls how fast keyframe images change (default: 1.0). `>1.0` increases swap frequency (faster movement), `<1.0` reduces swap frequency (slower movement). Effective swap rate is still bounded by `--min-segment-frames`, `--max-segment-frames`, `--fps`, and `--pace`.
 - `--analyze-only`: Print audio analysis without generating timeline
 - `--overwrite`: Overwrite existing output file
 

@@ -255,51 +255,126 @@ def write_stft_vocoder_paced_audio(
     return out_path
 
 
-def _allocate_segment_frames(weighted_frames: np.ndarray, target_total: int) -> list[int]:
-    """Allocate integer frame counts that sum to target_total.
-
-    At least one frame is assigned to each segment when possible.
-    """
+def _allocate_segment_frames(
+    weighted_frames: np.ndarray,
+    target_total: int,
+    min_frames: int = 1,
+    max_frames: int | None = None,
+) -> list[int]:
+    """Allocate integer frame counts that sum to target_total within bounds."""
     if target_total < 1:
         raise ValueError("target_total must be >= 1")
+    if min_frames < 1:
+        raise ValueError("min_frames must be >= 1")
+    if max_frames is not None and max_frames < min_frames:
+        raise ValueError("max_frames must be >= min_frames")
     if weighted_frames.size == 0:
         return []
 
     segment_count = int(weighted_frames.size)
-    if target_total < segment_count:
-        raise ValueError("target_total is too small for one-frame-per-segment allocation")
+    if target_total < segment_count * min_frames:
+        raise ValueError("target_total is too small for the requested minimum frames")
+    if max_frames is not None and target_total > segment_count * max_frames:
+        raise ValueError("target_total is too large for the requested maximum frames")
 
     normalized = weighted_frames.astype(np.float64)
     normalized = np.maximum(normalized, 1e-6)
     normalized = normalized * (target_total / float(np.sum(normalized)))
 
     frames = np.floor(normalized).astype(np.int64)
-    frames = np.maximum(frames, 1)
+    frames = np.maximum(frames, min_frames)
+    if max_frames is not None:
+        frames = np.minimum(frames, max_frames)
 
     total = int(np.sum(frames))
-    if total < target_total:
-        need = target_total - total
-        deficits = normalized - frames
-        order = np.argsort(-deficits)
-        for idx in order[:need]:
-            frames[idx] += 1
-    elif total > target_total:
-        over = total - target_total
-        removable = np.where(frames > 1)[0]
-        if removable.size == 0:
-            raise ValueError("Cannot reduce frames while preserving one frame per segment")
+    while total < target_total:
+        if max_frames is None:
+            candidates = np.arange(segment_count)
+        else:
+            candidates = np.where(frames < max_frames)[0]
+        if candidates.size == 0:
+            raise ValueError("Cannot reach target_total while respecting max_frames")
 
-        surplus = frames - normalized
-        order = removable[np.argsort(-surplus[removable])]
-        ptr = 0
-        while over > 0:
-            idx = int(order[ptr % len(order)])
-            if frames[idx] > 1:
+        deficits = normalized[candidates] - frames[candidates]
+        order = candidates[np.argsort(-deficits)]
+        progressed = False
+        for idx in order:
+            if total >= target_total:
+                break
+            if max_frames is None or frames[idx] < max_frames:
+                frames[idx] += 1
+                total += 1
+                progressed = True
+        if not progressed:
+            raise ValueError("Unable to allocate remaining frames")
+
+    while total > target_total:
+        candidates = np.where(frames > min_frames)[0]
+        if candidates.size == 0:
+            raise ValueError("Cannot reduce frame count while respecting min_frames")
+
+        surplus = frames[candidates] - normalized[candidates]
+        order = candidates[np.argsort(-surplus)]
+        progressed = False
+        for idx in order:
+            if total <= target_total:
+                break
+            if frames[idx] > min_frames:
                 frames[idx] -= 1
-                over -= 1
-            ptr += 1
+                total -= 1
+                progressed = True
+        if not progressed:
+            raise ValueError("Unable to reduce excess frames")
 
     return [int(value) for value in frames]
+
+
+def _resample_segment_times(
+    segment_times: list[float],
+    target_count: int,
+    duration_seconds: float,
+) -> list[float]:
+    """Resample segment start times to a target count while preserving shape."""
+    if target_count < 1:
+        raise ValueError("target_count must be >= 1")
+    if not segment_times:
+        return [0.0]
+    if target_count == len(segment_times):
+        return segment_times
+
+    source = np.array(segment_times, dtype=np.float64)
+    if source[0] != 0.0:
+        source[0] = 0.0
+
+    if target_count == 1:
+        return [0.0]
+
+    src_pos = np.linspace(0.0, 1.0, num=len(source))
+    dst_pos = np.linspace(0.0, 1.0, num=target_count)
+    resampled = np.interp(dst_pos, src_pos, source)
+
+    upper = max(0.0, duration_seconds - 1e-6)
+    resampled = np.clip(resampled, 0.0, upper)
+    resampled[0] = 0.0
+    for idx in range(1, len(resampled)):
+        if resampled[idx] <= resampled[idx - 1]:
+            resampled[idx] = min(upper, resampled[idx - 1] + 1e-6)
+
+    return [float(value) for value in resampled]
+
+
+def _segment_energies_from_times(features: AudioFeatures, segment_times: list[float]) -> list[float]:
+    """Compute per-segment mean energy for the provided segment start times."""
+    segment_end_times = segment_times[1:] + [features.duration_seconds]
+    energies: list[float] = []
+    for start_time, end_time in zip(segment_times, segment_end_times):
+        mask = (features.frame_times >= start_time) & (features.frame_times < end_time)
+        if np.any(mask):
+            value = float(np.mean(features.energy[mask]))
+        else:
+            value = 0.5
+        energies.append(value)
+    return energies
 
 
 def generate_timeline_from_audio(
@@ -309,6 +384,7 @@ def generate_timeline_from_audio(
     min_segment_frames: int = 8,
     max_segment_frames: int = 64,
     pace: float = 1.0,
+    image_swap_speed: float = 1.0,
 ) -> dict[str, Any]:
     """Generate a timeline JSON from an audio file.
     
@@ -327,12 +403,16 @@ def generate_timeline_from_audio(
         max_segment_frames: Maximum frames per segment
         pace: Global pace scale for timeline length. 1.0 matches audio duration,
             >1.0 creates longer/slower timelines, <1.0 creates shorter/faster timelines.
+        image_swap_speed: Segment cadence scale for keyframe swapping.
+            >1.0 means more/faster image swaps, <1.0 means fewer/slower image swaps.
         
     Returns:
         Timeline dictionary ready for JSON serialization
     """
     if pace <= 0:
         raise ValueError("pace must be > 0")
+    if image_swap_speed <= 0:
+        raise ValueError("image_swap_speed must be > 0")
 
     features = load_and_analyze_audio(audio_path)
 
@@ -342,12 +422,18 @@ def generate_timeline_from_audio(
     target_total_frames = max(2, int(round(features.duration_seconds * fps * pace)))
     target_segment_frames = target_total_frames - 1
 
-    # Ensure one frame can be assigned per segment while preserving total duration.
-    if len(segment_times) > target_segment_frames:
-        downsample_count = target_segment_frames
-        indices = [int(i * len(segment_times) / downsample_count) for i in range(downsample_count)]
-        segment_times = [segment_times[idx] for idx in indices]
-        segment_energies = [segment_energies[idx] for idx in indices]
+    min_segments_needed = max(1, int(np.ceil(target_segment_frames / max_segment_frames)))
+    max_segments_allowed = max(1, int(np.floor(target_segment_frames / min_segment_frames)))
+    desired_segments = max(1, int(round(len(segment_times) * image_swap_speed)))
+    segment_count = min(max(desired_segments, min_segments_needed), max_segments_allowed)
+
+    if segment_count != len(segment_times):
+        segment_times = _resample_segment_times(
+            segment_times,
+            target_count=segment_count,
+            duration_seconds=features.duration_seconds,
+        )
+        segment_energies = _segment_energies_from_times(features, segment_times)
 
     segment_end_times = segment_times[1:] + [features.duration_seconds]
     segment_durations = np.array(
@@ -363,7 +449,12 @@ def generate_timeline_from_audio(
     preference_mean = float(np.mean(reactive_preference)) if reactive_preference.size else 1.0
     reactive_scale = reactive_preference / max(preference_mean, 1e-6)
     weighted_frames = segment_durations * fps * reactive_scale
-    frames_per_segment = _allocate_segment_frames(weighted_frames, target_segment_frames)
+    frames_per_segment = _allocate_segment_frames(
+        weighted_frames,
+        target_segment_frames,
+        min_frames=min_segment_frames,
+        max_frames=max_segment_frames,
+    )
 
     # Get audio features at key points
     segment_specs = []

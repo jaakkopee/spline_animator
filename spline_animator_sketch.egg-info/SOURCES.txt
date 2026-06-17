@@ -1,4 +1,5 @@
 README.md
+audio_reactive.py
 birth_of_the_four_classical_elements.py
 pyproject.toml
 spline_animator.py

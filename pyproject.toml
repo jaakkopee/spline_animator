@@ -14,6 +14,8 @@ dependencies = [
     "imageio>=2.34",
     "imageio-ffmpeg>=0.4.9",
     "jsonschema>=4.23",
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
 ]
 
 [project.scripts]
@@ -21,4 +23,4 @@ spline-animator = "spline_animator:main"
 birth-of-elements = "birth_of_the_four_classical_elements:main"
 
 [tool.setuptools]
-py-modules = ["spline_animator", "birth_of_the_four_classical_elements"]
+py-modules = ["spline_animator", "birth_of_the_four_classical_elements", "audio_reactive"]

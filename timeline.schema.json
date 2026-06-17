@@ -42,6 +42,13 @@
         "audio_path": {
           "type": "string",
           "minLength": 1
+        },
+        "audio_pace": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "audio_paced": {
+          "type": "boolean"
         }
       }
     }

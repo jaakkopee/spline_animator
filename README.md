@@ -153,6 +153,7 @@ Audio-generated timelines include `render_hints.audio_path` automatically, so `r
 When `--pace` is not `1.0`, timeline generation also writes an STFT phase-vocoder processed audio file:
 - `--pace > 1.0`: stretched (longer) audio
 - `--pace < 1.0`: compressed (shorter) audio
+If a timeline carries `render_hints.audio_pace` with a non-1.0 value and `render_hints.audio_paced` is false, `render --timeline ...` auto-generates paced audio before muxing.
 
 Analyze audio without generating timeline:
 
@@ -257,6 +258,8 @@ Optional render hints in timeline JSON:
 - `render_hints.chroma_threshold`
 - `render_hints.mp4_background`
 - `render_hints.audio_path`
+- `render_hints.audio_pace`
+- `render_hints.audio_paced`
 
 When rendering with `--timeline`, these hints are used automatically if equivalent CLI options are omitted.
 

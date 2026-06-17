@@ -302,59 +302,6 @@ def _allocate_segment_frames(weighted_frames: np.ndarray, target_total: int) -> 
     return [int(value) for value in frames]
 
 
-def create_paced_audio_stft_vocoder(
-    audio_path: Path | str,
-    output_path: Path | str,
-    pace: float,
-    n_fft: int = 2048,
-    hop_length: int = 512,
-) -> Path:
-    """Create a time-scaled audio file using an STFT phase vocoder.
-
-    Args:
-        audio_path: Input audio file path
-        output_path: Output audio file path
-        pace: Duration scale factor. >1 stretches, <1 compresses.
-        n_fft: FFT size for STFT analysis
-        hop_length: Hop size for STFT analysis
-
-    Returns:
-        Path to the written audio file
-    """
-    if pace <= 0:
-        raise ValueError("pace must be > 0")
-
-    src = Path(audio_path)
-    if not src.exists():
-        raise FileNotFoundError(f"Audio file not found: {src}")
-
-    dst = Path(output_path)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    # librosa phase vocoder rate semantics: >1 speeds up (shorter), <1 slows down (longer).
-    rate = 1.0 / pace
-    target_dtype = np.float32
-
-    data, sr = sf.read(src, always_2d=True)
-    if data.size == 0:
-        raise ValueError(f"Audio file has no samples: {src}")
-
-    channels = []
-    for ch in range(data.shape[1]):
-        channel = data[:, ch].astype(np.float32, copy=False)
-        stft = librosa.stft(channel, n_fft=n_fft, hop_length=hop_length)
-        stretched_stft = librosa.phase_vocoder(stft, rate=rate, hop_length=hop_length)
-        target_len = max(1, int(round(channel.shape[0] * pace)))
-        stretched = librosa.istft(stretched_stft, hop_length=hop_length, length=target_len)
-        channels.append(stretched.astype(target_dtype, copy=False))
-
-    # Align channels to the shortest length after ISTFT boundary handling.
-    min_len = min(ch.shape[0] for ch in channels)
-    stacked = np.stack([ch[:min_len] for ch in channels], axis=1)
-    sf.write(dst, stacked, sr)
-    return dst
-
-
 def generate_timeline_from_audio(
     audio_path: Path | str,
     keyframe_paths: list[Path | str] | None = None,
@@ -485,6 +432,7 @@ def generate_timeline_from_audio(
         "render_hints": {
             "audio_path": str(Path(audio_path).expanduser().resolve()),
             "audio_pace": float(pace),
+            "audio_paced": False,
         },
     }
 

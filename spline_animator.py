@@ -967,17 +967,19 @@ def _validate_timeline_schema(timeline_path: Path, schema_path: Path) -> list[st
 
 def _load_render_hints_from_timeline(
     timeline_path: Path,
-) -> tuple[ChromaKeySpec | None, tuple[int, int, int] | None, Path | None]:
+) -> tuple[ChromaKeySpec | None, tuple[int, int, int] | None, Path | None, float | None, bool]:
     data = json.loads(timeline_path.read_text(encoding="utf-8"))
     raw_hints = data.get("render_hints")
     if raw_hints is None:
-        return None, None, None
+        return None, None, None, None, False
     if not isinstance(raw_hints, dict):
         raise ValueError("render_hints must be an object when provided")
 
     chroma: ChromaKeySpec | None = None
     background: tuple[int, int, int] | None = None
     audio_path: Path | None = None
+    audio_pace: float | None = None
+    audio_paced = False
 
     raw_chroma = raw_hints.get("chroma_key")
     if raw_chroma is not None:
@@ -1001,7 +1003,22 @@ def _load_render_hints_from_timeline(
             resolved = (timeline_path.parent / resolved).resolve()
         audio_path = resolved
 
-    return chroma, background, audio_path
+    raw_audio_pace = raw_hints.get("audio_pace")
+    if raw_audio_pace is not None:
+        try:
+            audio_pace = float(raw_audio_pace)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("render_hints.audio_pace must be a number") from exc
+        if audio_pace <= 0:
+            raise ValueError("render_hints.audio_pace must be > 0")
+
+    raw_audio_paced = raw_hints.get("audio_paced")
+    if raw_audio_paced is not None:
+        if not isinstance(raw_audio_paced, bool):
+            raise ValueError("render_hints.audio_paced must be a boolean")
+        audio_paced = raw_audio_paced
+
+    return chroma, background, audio_path, audio_pace, audio_paced
 
 
 def _attach_audio_to_mp4(video_path: Path, audio_path: Path, output_path: Path) -> None:
@@ -1475,6 +1492,7 @@ def _run_timeline_compose(args: argparse.Namespace) -> None:
             render_hints["mp4_background"] = f"{bg[0]},{bg[1]},{bg[2]}"
         if audio_hint is not None:
             render_hints["audio_path"] = str(audio_hint)
+            render_hints["audio_paced"] = False
 
     timeline_data: dict[str, Any] = {
         "keyframes": [str(path.relative_to(input_dir)) if not path.is_absolute() else str(path) for path in keyframes],
@@ -1572,6 +1590,7 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
             render_hints = {}
             timeline_data["render_hints"] = render_hints
         render_hints["audio_path"] = str(written_audio)
+        render_hints["audio_paced"] = True
 
     # Write timeline
     output_path.write_text(json.dumps(timeline_data, indent=2), encoding="utf-8")
@@ -1847,16 +1866,40 @@ def main() -> None:
         chroma_key = _chroma_key_from_args(args)
         mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
         audio_path = Path(args.audio).expanduser() if args.audio else None
+        hint_audio_pace: float | None = None
+        hint_audio_paced = False
         narrator = WitchyNarrator(enabled=not args.quiet)
         narrator.note("Gathering keyframes and preparing the ritual circle.")
         if timeline_path is not None:
-            hint_chroma, hint_bg, hint_audio = _load_render_hints_from_timeline(timeline_path)
+            hint_chroma, hint_bg, hint_audio, hint_audio_pace, hint_audio_paced = _load_render_hints_from_timeline(
+                timeline_path
+            )
             if chroma_key is None:
                 chroma_key = hint_chroma
             if mp4_background is None:
                 mp4_background = hint_bg
             if audio_path is None:
                 audio_path = hint_audio
+
+        if (
+            audio_path is not None
+            and timeline_path is not None
+            and hint_audio_pace is not None
+            and abs(hint_audio_pace - 1.0) > 1e-9
+            and not hint_audio_paced
+            and args.audio is None
+        ):
+            pace_tag = f"{hint_audio_pace:.4f}".replace("-", "neg").replace(".", "p")
+            derived_name = f"{timeline_path.stem}.renderpace_{pace_tag}.vocoder.wav"
+            derived_audio_path = (timeline_path.parent / derived_name).resolve()
+            if not derived_audio_path.exists():
+                narrator.note("Shaping timeline hint audio through STFT vocoder.")
+                write_stft_vocoder_paced_audio(
+                    audio_path=audio_path,
+                    output_path=derived_audio_path,
+                    pace=hint_audio_pace,
+                )
+            audio_path = derived_audio_path
 
         output_path = Path(args.output)
         if audio_path is not None and not audio_path.exists():
@@ -1883,7 +1926,7 @@ def main() -> None:
         chroma_key = _chroma_key_from_args(args)
         narrator = WitchyNarrator(enabled=not args.quiet)
         if timeline_path is not None and chroma_key is None:
-            hint_chroma, _, _ = _load_render_hints_from_timeline(timeline_path)
+            hint_chroma, _, _, _, _ = _load_render_hints_from_timeline(timeline_path)
             chroma_key = hint_chroma
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
@@ -1950,7 +1993,9 @@ def main() -> None:
             segments=segments,
             fps=args.fps,
         )
-        hint_chroma, hint_bg, hint_audio = _load_render_hints_from_timeline(timeline_path)
+        hint_chroma, hint_bg, hint_audio, hint_audio_pace, hint_audio_paced = _load_render_hints_from_timeline(
+            timeline_path
+        )
 
         print("Timeline doctor report")
         print(f" - keyframes: {len(image_paths)}")
@@ -1963,6 +2008,8 @@ def main() -> None:
         print(f" - render hint chroma: {'set' if hint_chroma else 'none'}")
         print(f" - render hint mp4 background: {hint_bg if hint_bg else 'none'}")
         print(f" - render hint audio: {hint_audio if hint_audio else 'none'}")
+        print(f" - render hint audio pace: {hint_audio_pace if hint_audio_pace is not None else 'none'}")
+        print(f" - render hint audio is paced: {'yes' if hint_audio_paced else 'no'}")
 
         print("Resolved segments")
         for idx, segment in enumerate(segments):

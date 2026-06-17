@@ -1,0 +1,346 @@
+{
+  "keyframes": [
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png",
+    "02_blue_circle_indigo_to_blue_alpha_outside.png",
+    "03_blue_point_rainbow_spiral.png",
+    "04_darting_blue_line_rainbow_streaks.png",
+    "05_violet_triangle_blue_fill.png",
+    "01_red_point_blue_stars.png"
+  ],
+  "defaults": {
+    "easing": "ease-in-out",
+    "interpolation": "catmull-rom",
+    "alpha_blend": "premultiplied",
+    "spline_tension": 0.1,
+    "spline_bias": 0.0,
+    "spline_continuity": -0.15,
+    "spline_endpoint": "mirror"
+  },
+  "segments": [
+    {
+      "frames": 19,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.19566040486097336,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 60,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.8940024971961975,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 29,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.07780741155147552,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 13,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.3419571928679943,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 57,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.8177823424339294,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 25,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.04002842307090759,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 37,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.2834364175796509,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 43,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.44207924604415894,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 16,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.28017719089984894,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 51,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.656805545091629,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 34,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.21091614663600922,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 19,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.2033589482307434,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 58,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.863781064748764,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 29,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.06359103322029114,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 15,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.2956802025437355,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 55,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.7614225149154663,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 24,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.04793865978717804,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 16,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.26673614978790283,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 59,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.8740987181663513,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 30,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.09718109667301178,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 14,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.3200053349137306,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 55,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.7791927754878998,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 33,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.1958364099264145,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 21,
+      "easing": "smoothstep",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.13387026637792587,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 60,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.9162617921829224,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 31,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.13883253931999207,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 15,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.30817773193120956,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 42,
+      "easing": "ease-in-out",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": 0.42511194944381714,
+      "spline_bias": 0.0,
+      "spline_continuity": -0.15,
+      "spline_endpoint": "mirror"
+    },
+    {
+      "frames": 16,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.2774994745850563,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    },
+    {
+      "frames": 12,
+      "easing": "ease-in",
+      "interpolation": "catmull-rom",
+      "alpha_blend": "premultiplied",
+      "spline_tension": -0.38256631791591644,
+      "spline_bias": 0.0,
+      "spline_continuity": 0.0,
+      "spline_endpoint": "clamp"
+    }
+  ]
+}

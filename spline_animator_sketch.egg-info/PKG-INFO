@@ -9,6 +9,8 @@ Requires-Dist: Pillow>=10.0
 Requires-Dist: imageio>=2.34
 Requires-Dist: imageio-ffmpeg>=0.4.9
 Requires-Dist: jsonschema>=4.23
+Requires-Dist: librosa>=0.10.0
+Requires-Dist: soundfile>=0.12.0
 
 # Spline Animator (Sketch Repo)
 
@@ -47,6 +49,9 @@ spline-animator render \
   --frames-per-segment 20 \
   --fps 24
 ```
+
+During `render` and `export-frames`, the app prints cute witchy progress commentary for long loops.
+Use `--quiet` to silence it.
 
 Render with easing and alpha-aware blending options:
 
@@ -91,7 +96,8 @@ spline-animator export-frames \
   --output-dir artifacts/frames \
   --frames-per-segment 20 \
   --chroma-key '#000000' \
-  --chroma-threshold 16
+  --chroma-threshold 16 \
+  --quiet
 ```
 
 Write a timeline template and render from JSON timeline:
@@ -115,6 +121,22 @@ spline-animator timeline-doctor \
   --schema timeline.schema.json \
   --input-dir assets/test_images \
   --fps 24
+
+spline-animator timeline-wizard \
+  --input-dir assets/test_images \
+  --schema timeline.schema.json
+
+spline-animator timeline-compose \
+  --input-dir assets/test_images \
+  --output timeline.compose.json \
+  --preset cinematic-smooth \
+  --frames-per-segment 24 \
+  --keyframes 1,2,3,4 \
+  --segment-overrides-file segment_overrides.json \
+  --chroma-key 0,0,0 \
+  --chroma-threshold 12 \
+  --mp4-background 8,12,24 \
+  --overwrite
 ```
 
 ## Timeline JSON format
@@ -161,10 +183,52 @@ Timeline spline fields:
 - `spline_endpoint` in `{clamp, mirror, wrap}`
 - You can place these in `defaults` and override per entry in `segments`.
 
+Optional render hints in timeline JSON:
+- `render_hints.chroma_key`
+- `render_hints.chroma_threshold`
+- `render_hints.mp4_background`
+
+When rendering with `--timeline`, these hints are used automatically if equivalent CLI options are omitted.
+
 Phase 1 timeline tooling:
 - `timeline.schema.json`: JSON Schema for structural validation.
 - `validate-timeline`: checks schema and runtime timeline resolution (paths, segment counts, coercion).
 - `timeline-doctor`: prints resolved timeline settings, duration/frame estimates, and resource warnings.
+
+Phase 2 timeline wizard:
+- `timeline-wizard`: interactive terminal wizard for building/updating timeline JSON.
+- Supports presets: `cinematic-smooth`, `stable-low-overshoot`, `loop-friendly`, `fast-cuts`.
+- Uses mixed flow: auto-build segments from keyframes, then edit selected segments.
+- Asks output mode each run: create new file or update existing file.
+- Optional advanced section for chroma/MP4 render hints.
+- Asks for confirmation on risky settings (high frame count / high estimated memory).
+
+Phase 2 companion command:
+- `timeline-compose`: non-interactive/scriptable timeline creation.
+- Supports the same presets and spline controls as wizard defaults.
+- `--keyframes` accepts comma-separated 1-based indices or file names/paths.
+- `--segment-overrides-file` applies per-segment overrides for selected segments.
+- `--overwrite` allows replacing existing output file.
+- `--allow-risky` bypasses safety stop for very large frame/memory estimates.
+
+Example `segment_overrides.json`:
+
+```json
+[
+  {
+    "index": 2,
+    "duration_frames": 12,
+    "easing": "ease-in",
+    "interpolation": "linear"
+  },
+  {
+    "index": 3,
+    "duration_seconds": 1.2,
+    "spline_tension": 0.3,
+    "spline_endpoint": "wrap"
+  }
+]
+```
 
 Supported easing values:
 - `linear`

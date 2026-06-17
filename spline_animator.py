@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from birth_of_the_four_classical_elements import generate_test_images
+from audio_reactive import generate_timeline_from_audio, load_and_analyze_audio, print_audio_analysis
 
 
 @dataclass
@@ -1402,6 +1403,64 @@ def _run_timeline_compose(args: argparse.Namespace) -> None:
         print(f" - Warnings: {len(warnings)}")
 
 
+def _run_timeline_from_audio(args: argparse.Namespace) -> None:
+    audio_path = Path(args.audio)
+    output_path = Path(args.output)
+    fps = int(args.fps)
+    min_frames = int(args.min_segment_frames)
+    max_frames = int(args.max_segment_frames)
+
+    if fps < 1:
+        raise ValueError("fps must be >= 1")
+    if min_frames < 1:
+        raise ValueError("min_segment_frames must be >= 1")
+    if max_frames < min_frames:
+        raise ValueError("max_segment_frames must be >= min_segment_frames")
+
+    # Load and analyze audio
+    features = load_and_analyze_audio(audio_path)
+
+    if args.analyze_only:
+        print_audio_analysis(features)
+        return
+
+    # Parse keyframes if provided
+    keyframes = None
+    if args.keyframes:
+        keyframes = [Path(k.strip()) for k in args.keyframes.split(",") if k.strip()]
+
+    # Generate timeline from audio
+    timeline_data = generate_timeline_from_audio(
+        audio_path=audio_path,
+        keyframe_paths=keyframes,
+        fps=fps,
+        min_segment_frames=min_frames,
+        max_segment_frames=max_frames,
+    )
+
+    # Check if output exists
+    if output_path.exists() and not args.overwrite:
+        raise RuntimeError(f"Refusing to overwrite existing file: {output_path}. Use --overwrite to replace it.")
+
+    # Write timeline
+    output_path.write_text(json.dumps(timeline_data, indent=2), encoding="utf-8")
+
+    # Print summary
+    num_keyframes = len(timeline_data["keyframes"])
+    num_segments = len(timeline_data["segments"])
+    total_frames = sum(segment["frames"] for segment in timeline_data["segments"]) + 1
+    duration_estimate = total_frames / fps if fps > 0 else 0
+
+    print(f"Wrote audio-reactive timeline to {output_path}")
+    print(f" - Audio file: {audio_path}")
+    print(f" - Audio duration: {features.duration_seconds:.2f}s")
+    print(f" - Keyframes: {num_keyframes}")
+    print(f" - Segments: {num_segments}")
+    print(f" - Estimated total frames: {total_frames}")
+    print(f" - Estimated timeline duration: {duration_estimate:.2f}s at {fps} fps")
+    print(f" - Detected onsets: {len(features.onset_times)}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Spline interpolation experiments for image sequences.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1527,6 +1586,37 @@ def parse_args() -> argparse.Namespace:
     )
     cmd_compose.add_argument("--overwrite", action="store_true")
     cmd_compose.add_argument("--allow-risky", action="store_true")
+
+    cmd_audio = subparsers.add_parser(
+        "timeline-from-audio",
+        help="Generate timeline from audio file using audio reactivity.",
+    )
+    cmd_audio.add_argument("--audio", required=True, help="Path to audio file (WAV, MP3, FLAC, etc.)")
+    cmd_audio.add_argument("--output", required=True, help="Output timeline JSON path")
+    cmd_audio.add_argument(
+        "--keyframes",
+        default=None,
+        help="Comma-separated keyframe paths. If omitted, generates placeholder names.",
+    )
+    cmd_audio.add_argument("--fps", type=int, default=24, help="Target frames per second")
+    cmd_audio.add_argument(
+        "--min-segment-frames",
+        type=int,
+        default=8,
+        help="Minimum frames per segment",
+    )
+    cmd_audio.add_argument(
+        "--max-segment-frames",
+        type=int,
+        default=64,
+        help="Maximum frames per segment",
+    )
+    cmd_audio.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="Analyze audio and print features without generating timeline",
+    )
+    cmd_audio.add_argument("--overwrite", action="store_true", help="Overwrite output if it exists")
 
     return parser.parse_args()
 
@@ -1754,6 +1844,14 @@ def main() -> None:
     if args.command == "timeline-compose":
         try:
             _run_timeline_compose(args)
+        except RuntimeError as exc:
+            print(str(exc))
+            raise SystemExit(1) from exc
+        return
+
+    if args.command == "timeline-from-audio":
+        try:
+            _run_timeline_from_audio(args)
         except RuntimeError as exc:
             print(str(exc))
             raise SystemExit(1) from exc

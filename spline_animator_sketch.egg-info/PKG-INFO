@@ -139,6 +139,71 @@ spline-animator timeline-compose \
   --overwrite
 ```
 
+## Audio-reactive timeline generation
+
+Generate a timeline that's fully driven by audio features. The timeline duration matches the audio, segment boundaries are detected from onsets, and all segment parameters are determined by audio analysis:
+
+```bash
+spline-animator timeline-from-audio \
+  --audio song.mp3 \
+  --output timeline_from_audio.json \
+  --keyframes frame_1.png,frame_2.png,frame_3.png \
+  --fps 24
+```
+
+Analyze audio without generating timeline:
+
+```bash
+spline-animator timeline-from-audio \
+  --audio song.mp3 \
+  --output /tmp/dummy.json \
+  --analyze-only
+```
+
+### How it works
+
+The audio-reactive system:
+1. Loads the audio file using librosa (supports WAV, MP3, FLAC, OGG, etc.)
+2. Extracts audio features:
+   - Energy envelope (loudness over time)
+   - Spectral centroid (brightness of the sound)
+   - Zero-crossing rate (noisiness)
+   - Onset events (beat-like transients)
+   - Chroma features (harmonic content)
+3. Detects segment boundaries using onset detection
+4. Maps audio features to timeline segment parameters:
+   - **Frame count**: Driven by energy. Louder sections get more frames (slower motion)
+   - **Easing**: Determined by energy and spectral content
+     - High energy + bright: `ease-out` (sharp easing)
+     - Moderate energy: `ease-in-out` (smooth easing)
+     - Low energy: `ease-in` or `linear` (gentle easing)
+   - **Spline tension**: Scaled by energy (-1 to +1)
+     - Low energy: negative tension (loose, flowing curves)
+     - High energy: positive tension (tight, controlled curves)
+   - **Spline endpoint**: `clamp` for low energy, `mirror` for high energy
+   - **Continuity**: Adjusted based on energy to shape transition smoothness
+
+### Options
+
+- `--audio`: Path to audio file (required)
+- `--output`: Output timeline JSON path (required)
+- `--keyframes`: Comma-separated keyframe paths. If fewer keyframes than segments are detected, they cycle through. If omitted, generates placeholder names.
+- `--fps`: Target frames per second (default: 24)
+- `--min-segment-frames`: Minimum frames per segment (default: 8)
+- `--max-segment-frames`: Maximum frames per segment (default: 64)
+- `--analyze-only`: Print audio analysis without generating timeline
+- `--overwrite`: Overwrite existing output file
+
+### Supported audio formats
+
+- WAV
+- MP3
+- FLAC
+- OGG
+- M4A
+- AIFF
+- And any format supported by audioread
+
 ## Timeline JSON format
 
 Timeline lets you define keyframe order, per-segment duration, easing, interpolation mode, and alpha blending strategy.

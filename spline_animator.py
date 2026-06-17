@@ -4,9 +4,10 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import imageio.v3 as iio
+import imageio.v2 as iio2
 import numpy as np
 from PIL import Image
 
@@ -153,22 +154,49 @@ class SplineAnimator:
     def __init__(self, keyframes: list[np.ndarray]):
         if len(keyframes) < 2:
             raise ValueError("Need at least two keyframes.")
-        self.keyframes = [frame.astype(np.float32) for frame in keyframes]
-        self.keyframes_premultiplied = [self._to_premultiplied(frame) for frame in self.keyframes]
+
+        converted_cache: dict[int, np.ndarray] = {}
+        premult_cache: dict[int, np.ndarray] = {}
+        self.keyframes: list[np.ndarray] = []
+        self.keyframes_premultiplied: list[np.ndarray] = []
+
+        for frame in keyframes:
+            cache_key = id(frame)
+            converted = converted_cache.get(cache_key)
+            if converted is None:
+                converted = frame.astype(np.float32, copy=False)
+                converted_cache[cache_key] = converted
+                premult_cache[cache_key] = self._to_premultiplied(converted)
+
+            self.keyframes.append(converted)
+            self.keyframes_premultiplied.append(premult_cache[cache_key])
 
     @classmethod
     def from_paths(cls, image_paths: list[Path]) -> "SplineAnimator":
         if len(image_paths) < 2:
             raise ValueError("Need at least two images to interpolate.")
 
-        images = [Image.open(path).convert("RGBA") for path in image_paths]
-        base_size = images[0].size
-
         normalized: list[np.ndarray] = []
-        for image in images:
-            if image.size != base_size:
-                image = image.resize(base_size, Image.Resampling.LANCZOS)
-            normalized.append(np.array(image, dtype=np.float32))
+        base_size: tuple[int, int] | None = None
+        array_cache: dict[Path, np.ndarray] = {}
+
+        for image_path in image_paths:
+            cached = array_cache.get(image_path)
+            if cached is not None:
+                normalized.append(cached)
+                continue
+
+            with Image.open(image_path) as image:
+                rgba = image.convert("RGBA")
+                if base_size is None:
+                    base_size = rgba.size
+                if rgba.size != base_size:
+                    rgba = rgba.resize(base_size, Image.Resampling.LANCZOS)
+                array = np.array(rgba, dtype=np.float32)
+
+            array_cache[image_path] = array
+            normalized.append(array)
+
         return cls(normalized)
 
     @staticmethod
@@ -386,18 +414,17 @@ class SplineAnimator:
             frame = self._from_premultiplied(frame)
         return frame
 
-    def interpolated_frames(
+    def iter_interpolated_frames(
         self,
         segments: list[SegmentSpec],
         chroma_key: ChromaKeySpec | None = None,
         narrator: WitchyNarrator | None = None,
-    ) -> list[np.ndarray]:
+    ) -> Iterator[np.ndarray]:
         if len(segments) != len(self.keyframes) - 1:
             raise ValueError("Number of segment specs must match number of keyframe transitions.")
         if any(spec.frames < 1 for spec in segments):
             raise ValueError("Each segment must have at least one frame.")
 
-        frames: list[np.ndarray] = []
         done_steps = 0
         total_steps = sum(spec.frames for spec in segments) + 1
         if narrator is not None:
@@ -410,17 +437,24 @@ class SplineAnimator:
                 t = step / spec.frames
                 frame = self._interpolate_segment_frame(i, t, spec)
                 frame_u8 = np.clip(frame, 0, 255).astype(np.uint8)
-                frames.append(self._apply_chroma_key(frame_u8, chroma_key))
+                yield self._apply_chroma_key(frame_u8, chroma_key)
                 done_steps += 1
                 if narrator is not None:
                     narrator.tick(done_steps)
 
         final_frame = np.clip(self.keyframes[-1], 0, 255).astype(np.uint8)
-        frames.append(self._apply_chroma_key(final_frame, chroma_key))
+        yield self._apply_chroma_key(final_frame, chroma_key)
         done_steps += 1
         if narrator is not None:
             narrator.tick(done_steps)
-        return frames
+
+    def interpolated_frames(
+        self,
+        segments: list[SegmentSpec],
+        chroma_key: ChromaKeySpec | None = None,
+        narrator: WitchyNarrator | None = None,
+    ) -> list[np.ndarray]:
+        return list(self.iter_interpolated_frames(segments, chroma_key=chroma_key, narrator=narrator))
 
     def export_frames(
         self,
@@ -451,30 +485,30 @@ class SplineAnimator:
         chroma_key: ChromaKeySpec | None = None,
         narrator: WitchyNarrator | None = None,
     ) -> None:
-        frames = self.interpolated_frames(segments, chroma_key=chroma_key, narrator=narrator)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         suffix = output_path.suffix.lower()
         if suffix == ".gif":
+            frames = self.interpolated_frames(segments, chroma_key=chroma_key, narrator=narrator)
             if narrator is not None:
                 narrator.note("Sealing the animation into a GIF charm.")
             iio.imwrite(output_path, frames, format="GIF", duration=1.0 / config.fps, loop=0)
             return
 
         if suffix == ".mp4":
-            if config.mp4_background is None:
-                rgb_frames = [frame[..., :3] for frame in frames]
-            else:
-                rgb_frames = []
-                if narrator is not None:
-                    narrator.begin("Compositing frames over MP4 background", len(frames))
-                for idx, frame in enumerate(frames):
-                    rgb_frames.append(self._composite_over_background(frame, config.mp4_background))
-                    if narrator is not None:
-                        narrator.tick(idx + 1)
+            with iio2.get_writer(str(output_path), fps=config.fps, codec="libx264") as writer:
+                for frame in self.iter_interpolated_frames(
+                    segments,
+                    chroma_key=chroma_key,
+                    narrator=narrator,
+                ):
+                    if config.mp4_background is None:
+                        rgb_frame = frame[..., :3]
+                    else:
+                        rgb_frame = self._composite_over_background(frame, config.mp4_background)
+                    writer.append_data(rgb_frame)
             if narrator is not None:
                 narrator.note("Binding the spell into an MP4 crystal.")
-            iio.imwrite(output_path, rgb_frames, fps=config.fps, codec="libx264")
             return
 
         raise ValueError("Unsupported output format. Use .gif or .mp4")
@@ -1704,6 +1738,7 @@ def main() -> None:
         chroma_key = _chroma_key_from_args(args)
         mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
         narrator = WitchyNarrator(enabled=not args.quiet)
+        narrator.note("Gathering keyframes and preparing the ritual circle.")
         if timeline_path is not None:
             hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
             if chroma_key is None:

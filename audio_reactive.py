@@ -191,6 +191,53 @@ def map_features_to_frames(
     return max(min_frames, min(max_frames, int(min_frames + (energy * (max_frames - min_frames)))))
 
 
+def _allocate_segment_frames(weighted_frames: np.ndarray, target_total: int) -> list[int]:
+    """Allocate integer frame counts that sum to target_total.
+
+    At least one frame is assigned to each segment when possible.
+    """
+    if target_total < 1:
+        raise ValueError("target_total must be >= 1")
+    if weighted_frames.size == 0:
+        return []
+
+    segment_count = int(weighted_frames.size)
+    if target_total < segment_count:
+        raise ValueError("target_total is too small for one-frame-per-segment allocation")
+
+    normalized = weighted_frames.astype(np.float64)
+    normalized = np.maximum(normalized, 1e-6)
+    normalized = normalized * (target_total / float(np.sum(normalized)))
+
+    frames = np.floor(normalized).astype(np.int64)
+    frames = np.maximum(frames, 1)
+
+    total = int(np.sum(frames))
+    if total < target_total:
+        need = target_total - total
+        deficits = normalized - frames
+        order = np.argsort(-deficits)
+        for idx in order[:need]:
+            frames[idx] += 1
+    elif total > target_total:
+        over = total - target_total
+        removable = np.where(frames > 1)[0]
+        if removable.size == 0:
+            raise ValueError("Cannot reduce frames while preserving one frame per segment")
+
+        surplus = frames - normalized
+        order = removable[np.argsort(-surplus[removable])]
+        ptr = 0
+        while over > 0:
+            idx = int(order[ptr % len(order)])
+            if frames[idx] > 1:
+                frames[idx] -= 1
+                over -= 1
+            ptr += 1
+
+    return [int(value) for value in frames]
+
+
 def generate_timeline_from_audio(
     audio_path: Path | str,
     keyframe_paths: list[Path | str] | None = None,
@@ -222,13 +269,37 @@ def generate_timeline_from_audio(
     # Extract segment boundaries from audio
     segment_times, segment_energies = extract_beat_timeline(features, fps=fps)
 
+    target_total_frames = max(2, int(round(features.duration_seconds * fps)))
+    target_segment_frames = target_total_frames - 1
+
+    # Ensure one frame can be assigned per segment while preserving total duration.
+    if len(segment_times) > target_segment_frames:
+        downsample_count = target_segment_frames
+        indices = [int(i * len(segment_times) / downsample_count) for i in range(downsample_count)]
+        segment_times = [segment_times[idx] for idx in indices]
+        segment_energies = [segment_energies[idx] for idx in indices]
+
+    segment_end_times = segment_times[1:] + [features.duration_seconds]
+    segment_durations = np.array(
+        [max(1e-6, end - start) for start, end in zip(segment_times, segment_end_times)],
+        dtype=np.float64,
+    )
+
+    # Use energy as a pacing weight while keeping the global frame budget tied to audio duration.
+    reactive_preference = np.array(
+        [map_features_to_frames(energy, min_segment_frames, max_segment_frames) for energy in segment_energies],
+        dtype=np.float64,
+    )
+    preference_mean = float(np.mean(reactive_preference)) if reactive_preference.size else 1.0
+    reactive_scale = reactive_preference / max(preference_mean, 1e-6)
+    weighted_frames = segment_durations * fps * reactive_scale
+    frames_per_segment = _allocate_segment_frames(weighted_frames, target_segment_frames)
+
     # Get audio features at key points
     segment_specs = []
-    for i, (start_time, energy) in enumerate(zip(segment_times, segment_energies)):
-        if i < len(segment_times) - 1:
-            end_time = segment_times[i + 1]
-        else:
-            end_time = features.duration_seconds
+    for i, (start_time, end_time, energy) in enumerate(
+        zip(segment_times, segment_end_times, segment_energies)
+    ):
 
         # Get average features for this segment
         mask = (features.frame_times >= start_time) & (features.frame_times < end_time)
@@ -241,7 +312,7 @@ def generate_timeline_from_audio(
 
         # Map features to segment parameters
         easing = map_features_to_easing(energy, avg_spectral_centroid, avg_zcr)
-        frames = map_features_to_frames(energy, min_segment_frames, max_segment_frames)
+        frames = frames_per_segment[i]
         tension = map_features_to_spline_tension(energy)
 
         segment_specs.append({

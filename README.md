@@ -74,6 +74,17 @@ spline-animator render \
   --mp4-background 8,12,24
 ```
 
+Attach audio while rendering MP4:
+
+```bash
+spline-animator render \
+  --input-dir assets/test_images \
+  --timeline timeline_from_audio.json \
+  --output artifacts/spline_with_audio.mp4 \
+  --audio song.mp3 \
+  --fps 24
+```
+
 Export interpolated frames for inspection:
 
 ```bash
@@ -127,15 +138,21 @@ spline-animator timeline-compose \
 
 ## Audio-reactive timeline generation
 
-Generate a timeline that's fully driven by audio features. The timeline duration matches the audio, segment boundaries are detected from onsets, and all segment parameters are determined by audio analysis:
+Generate a timeline that's fully driven by audio features. By default (`--pace 1.0`), timeline duration matches the audio. Segment boundaries are detected from onsets, and all segment parameters are determined by audio analysis:
 
 ```bash
 spline-animator timeline-from-audio \
   --audio song.mp3 \
   --output timeline_from_audio.json \
   --keyframes frame_1.png,frame_2.png,frame_3.png \
+  --pace 1.0 \
   --fps 24
 ```
+
+Audio-generated timelines include `render_hints.audio_path` automatically, so `render --timeline ... --output ...mp4` can attach audio without passing `--audio`.
+When `--pace` is not `1.0`, timeline generation also writes an STFT phase-vocoder processed audio file:
+- `--pace > 1.0`: stretched (longer) audio
+- `--pace < 1.0`: compressed (shorter) audio
 
 Analyze audio without generating timeline:
 
@@ -177,6 +194,7 @@ The audio-reactive system:
 - `--fps`: Target frames per second (default: 24)
 - `--min-segment-frames`: Minimum frames per segment (default: 8)
 - `--max-segment-frames`: Maximum frames per segment (default: 64)
+- `--pace`: Global segment length scale (default: 1.0). `1.0` matches audio duration, `>1.0` slows down/extends timeline, `<1.0` speeds up/shortens timeline. When not `1.0`, an STFT-vocoder audio file is generated and referenced in `render_hints.audio_path`.
 - `--analyze-only`: Print audio analysis without generating timeline
 - `--overwrite`: Overwrite existing output file
 
@@ -238,6 +256,7 @@ Optional render hints in timeline JSON:
 - `render_hints.chroma_key`
 - `render_hints.chroma_threshold`
 - `render_hints.mp4_background`
+- `render_hints.audio_path`
 
 When rendering with `--timeline`, these hints are used automatically if equivalent CLI options are omitted.
 

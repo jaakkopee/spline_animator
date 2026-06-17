@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -12,13 +15,19 @@ import numpy as np
 from PIL import Image
 
 from birth_of_the_four_classical_elements import generate_test_images
-from audio_reactive import generate_timeline_from_audio, load_and_analyze_audio, print_audio_analysis
+from audio_reactive import (
+    generate_timeline_from_audio,
+    load_and_analyze_audio,
+    print_audio_analysis,
+    write_stft_vocoder_paced_audio,
+)
 
 
 @dataclass
 class RenderConfig:
     fps: int = 24
     mp4_background: tuple[int, int, int] | None = None
+    audio_path: Path | None = None
 
 
 @dataclass
@@ -496,7 +505,17 @@ class SplineAnimator:
             return
 
         if suffix == ".mp4":
-            with iio2.get_writer(str(output_path), fps=config.fps, codec="libx264") as writer:
+            video_target = output_path
+            if config.audio_path is not None:
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f"{output_path.stem}.video_only.",
+                    suffix=".mp4",
+                    dir=str(output_path.parent),
+                )
+                os.close(fd)
+                video_target = Path(temp_name)
+
+            with iio2.get_writer(str(video_target), fps=config.fps, codec="libx264") as writer:
                 for frame in self.iter_interpolated_frames(
                     segments,
                     chroma_key=chroma_key,
@@ -507,6 +526,13 @@ class SplineAnimator:
                     else:
                         rgb_frame = self._composite_over_background(frame, config.mp4_background)
                     writer.append_data(rgb_frame)
+
+            if config.audio_path is not None:
+                if narrator is not None:
+                    narrator.note("Binding soundtrack into the MP4 crystal.")
+                _attach_audio_to_mp4(video_target, config.audio_path, output_path)
+                video_target.unlink(missing_ok=True)
+
             if narrator is not None:
                 narrator.note("Binding the spell into an MP4 crystal.")
             return
@@ -651,6 +677,11 @@ def _add_mp4_output_args(parser: argparse.ArgumentParser) -> None:
         "--mp4-background",
         default=None,
         help="Composite RGBA over this color for MP4 output. Format: R,G,B or #RRGGBB",
+    )
+    parser.add_argument(
+        "--audio",
+        default=None,
+        help="Optional audio file to mux into MP4 output.",
     )
 
 
@@ -934,16 +965,19 @@ def _validate_timeline_schema(timeline_path: Path, schema_path: Path) -> list[st
     return errors
 
 
-def _load_render_hints_from_timeline(timeline_path: Path) -> tuple[ChromaKeySpec | None, tuple[int, int, int] | None]:
+def _load_render_hints_from_timeline(
+    timeline_path: Path,
+) -> tuple[ChromaKeySpec | None, tuple[int, int, int] | None, Path | None]:
     data = json.loads(timeline_path.read_text(encoding="utf-8"))
     raw_hints = data.get("render_hints")
     if raw_hints is None:
-        return None, None
+        return None, None, None
     if not isinstance(raw_hints, dict):
         raise ValueError("render_hints must be an object when provided")
 
     chroma: ChromaKeySpec | None = None
     background: tuple[int, int, int] | None = None
+    audio_path: Path | None = None
 
     raw_chroma = raw_hints.get("chroma_key")
     if raw_chroma is not None:
@@ -957,7 +991,46 @@ def _load_render_hints_from_timeline(timeline_path: Path) -> tuple[ChromaKeySpec
     if raw_bg is not None:
         background = _parse_rgb_color(str(raw_bg))
 
-    return chroma, background
+    raw_audio = raw_hints.get("audio_path")
+    if raw_audio is not None:
+        text = str(raw_audio).strip()
+        if not text:
+            raise ValueError("render_hints.audio_path must not be empty")
+        resolved = Path(text).expanduser()
+        if not resolved.is_absolute():
+            resolved = (timeline_path.parent / resolved).resolve()
+        audio_path = resolved
+
+    return chroma, background, audio_path
+
+
+def _attach_audio_to_mp4(video_path: Path, audio_path: Path, output_path: Path) -> None:
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-shortest",
+        str(output_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg is required to attach audio to MP4 output") from exc
+    except subprocess.CalledProcessError as exc:
+        details = exc.stderr.strip().splitlines()
+        tail = details[-1] if details else "unknown ffmpeg error"
+        raise RuntimeError(f"Failed to attach audio to MP4 output: {tail}") from exc
 
 
 def _estimate_rgba_frame_buffer_gib(width: int, height: int, frames: int) -> float:
@@ -1389,13 +1462,19 @@ def _run_timeline_compose(args: argparse.Namespace) -> None:
     render_hints: dict[str, Any] | None = None
     chroma = _chroma_key_from_args(args)
     bg = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
-    if chroma is not None or bg is not None:
+    audio_hint = Path(args.audio).expanduser().resolve() if args.audio else None
+    if audio_hint is not None and not audio_hint.exists():
+        raise ValueError(f"Audio path for render hints not found: {audio_hint}")
+
+    if chroma is not None or bg is not None or audio_hint is not None:
         render_hints = {}
         if chroma is not None:
             render_hints["chroma_key"] = f"{chroma.color[0]},{chroma.color[1]},{chroma.color[2]}"
             render_hints["chroma_threshold"] = chroma.threshold
         if bg is not None:
             render_hints["mp4_background"] = f"{bg[0]},{bg[1]},{bg[2]}"
+        if audio_hint is not None:
+            render_hints["audio_path"] = str(audio_hint)
 
     timeline_data: dict[str, Any] = {
         "keyframes": [str(path.relative_to(input_dir)) if not path.is_absolute() else str(path) for path in keyframes],
@@ -1443,6 +1522,7 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
     fps = int(args.fps)
     min_frames = int(args.min_segment_frames)
     max_frames = int(args.max_segment_frames)
+    pace = float(args.pace)
 
     if fps < 1:
         raise ValueError("fps must be >= 1")
@@ -1450,6 +1530,8 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
         raise ValueError("min_segment_frames must be >= 1")
     if max_frames < min_frames:
         raise ValueError("max_segment_frames must be >= min_segment_frames")
+    if pace <= 0:
+        raise ValueError("pace must be > 0")
 
     # Load and analyze audio
     features = load_and_analyze_audio(audio_path)
@@ -1457,6 +1539,9 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
     if args.analyze_only:
         print_audio_analysis(features)
         return
+
+    if output_path.exists() and not args.overwrite:
+        raise RuntimeError(f"Refusing to overwrite existing file: {output_path}. Use --overwrite to replace it.")
 
     # Parse keyframes if provided
     keyframes = None
@@ -1470,11 +1555,23 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
         fps=fps,
         min_segment_frames=min_frames,
         max_segment_frames=max_frames,
+        pace=pace,
     )
 
-    # Check if output exists
-    if output_path.exists() and not args.overwrite:
-        raise RuntimeError(f"Refusing to overwrite existing file: {output_path}. Use --overwrite to replace it.")
+    if pace != 1.0:
+        pace_tag = f"{pace:.4f}".replace("-", "neg").replace(".", "p")
+        paced_audio_name = f"{output_path.stem}.pace_{pace_tag}.vocoder.wav"
+        paced_audio_path = (output_path.parent / paced_audio_name).resolve()
+        written_audio = write_stft_vocoder_paced_audio(
+            audio_path=audio_path,
+            output_path=paced_audio_path,
+            pace=pace,
+        )
+        render_hints = timeline_data.get("render_hints")
+        if not isinstance(render_hints, dict):
+            render_hints = {}
+            timeline_data["render_hints"] = render_hints
+        render_hints["audio_path"] = str(written_audio)
 
     # Write timeline
     output_path.write_text(json.dumps(timeline_data, indent=2), encoding="utf-8")
@@ -1488,10 +1585,16 @@ def _run_timeline_from_audio(args: argparse.Namespace) -> None:
     print(f"Wrote audio-reactive timeline to {output_path}")
     print(f" - Audio file: {audio_path}")
     print(f" - Audio duration: {features.duration_seconds:.2f}s")
+    print(f" - Pace scale: {pace:.2f}x")
     print(f" - Keyframes: {num_keyframes}")
     print(f" - Segments: {num_segments}")
     print(f" - Estimated total frames: {total_frames}")
     print(f" - Estimated timeline duration: {duration_estimate:.2f}s at {fps} fps")
+    if features.duration_seconds > 0:
+        ratio = duration_estimate / features.duration_seconds
+        print(f" - Timeline/Audio duration ratio: {ratio:.3f}x")
+    if pace != 1.0:
+        print(f" - Vocoder audio: {timeline_data['render_hints']['audio_path']}")
     print(f" - Detected onsets: {len(features.onset_times)}")
 
 
@@ -1646,6 +1749,12 @@ def parse_args() -> argparse.Namespace:
         help="Maximum frames per segment",
     )
     cmd_audio.add_argument(
+        "--pace",
+        type=float,
+        default=1.0,
+        help="Global segment length scale. 1.0 = audio duration, >1 slower/longer, <1 faster/shorter.",
+    )
+    cmd_audio.add_argument(
         "--analyze-only",
         action="store_true",
         help="Analyze audio and print features without generating timeline",
@@ -1737,22 +1846,31 @@ def main() -> None:
         default_spec = _default_segment_spec_from_args(args)
         chroma_key = _chroma_key_from_args(args)
         mp4_background = _parse_rgb_color(args.mp4_background) if args.mp4_background else None
+        audio_path = Path(args.audio).expanduser() if args.audio else None
         narrator = WitchyNarrator(enabled=not args.quiet)
         narrator.note("Gathering keyframes and preparing the ritual circle.")
         if timeline_path is not None:
-            hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
+            hint_chroma, hint_bg, hint_audio = _load_render_hints_from_timeline(timeline_path)
             if chroma_key is None:
                 chroma_key = hint_chroma
             if mp4_background is None:
                 mp4_background = hint_bg
+            if audio_path is None:
+                audio_path = hint_audio
+
+        output_path = Path(args.output)
+        if audio_path is not None and not audio_path.exists():
+            raise ValueError(f"Audio file not found: {audio_path}")
+        if output_path.suffix.lower() != ".mp4" and audio_path is not None:
+            raise ValueError("Audio muxing is only supported when output ends with .mp4")
+
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
             timeline_path=timeline_path,
             default_spec=default_spec,
             fps=args.fps,
         )
-        config = RenderConfig(fps=args.fps, mp4_background=mp4_background)
-        output_path = Path(args.output)
+        config = RenderConfig(fps=args.fps, mp4_background=mp4_background, audio_path=audio_path)
         animator.render_video(output_path, config, segments, chroma_key=chroma_key, narrator=narrator)
 
         estimated_frames = sum(spec.frames for spec in segments) + 1
@@ -1765,7 +1883,7 @@ def main() -> None:
         chroma_key = _chroma_key_from_args(args)
         narrator = WitchyNarrator(enabled=not args.quiet)
         if timeline_path is not None and chroma_key is None:
-            hint_chroma, _ = _load_render_hints_from_timeline(timeline_path)
+            hint_chroma, _, _ = _load_render_hints_from_timeline(timeline_path)
             chroma_key = hint_chroma
         animator, _, segments = _load_animator_and_segments(
             input_dir=Path(args.input_dir),
@@ -1832,7 +1950,7 @@ def main() -> None:
             segments=segments,
             fps=args.fps,
         )
-        hint_chroma, hint_bg = _load_render_hints_from_timeline(timeline_path)
+        hint_chroma, hint_bg, hint_audio = _load_render_hints_from_timeline(timeline_path)
 
         print("Timeline doctor report")
         print(f" - keyframes: {len(image_paths)}")
@@ -1844,6 +1962,7 @@ def main() -> None:
         print(f" - estimated RGBA buffer: {approx_gib:.2f} GiB")
         print(f" - render hint chroma: {'set' if hint_chroma else 'none'}")
         print(f" - render hint mp4 background: {hint_bg if hint_bg else 'none'}")
+        print(f" - render hint audio: {hint_audio if hint_audio else 'none'}")
 
         print("Resolved segments")
         for idx, segment in enumerate(segments):

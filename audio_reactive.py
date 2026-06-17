@@ -191,6 +191,70 @@ def map_features_to_frames(
     return max(min_frames, min(max_frames, int(min_frames + (energy * (max_frames - min_frames)))))
 
 
+def _time_scale_channel_stft_vocoder(
+    channel: np.ndarray,
+    pace: float,
+    target_samples: int,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+) -> np.ndarray:
+    """Time-scale a mono channel with an STFT phase vocoder."""
+    if pace <= 0:
+        raise ValueError("pace must be > 0")
+    if target_samples < 1:
+        raise ValueError("target_samples must be >= 1")
+
+    rate = 1.0 / pace
+    spectrum = librosa.stft(channel, n_fft=n_fft, hop_length=hop_length)
+    stretched = librosa.phase_vocoder(spectrum, rate=rate, hop_length=hop_length)
+    reconstructed = librosa.istft(stretched, hop_length=hop_length, length=target_samples)
+    return reconstructed.astype(np.float32, copy=False)
+
+
+def write_stft_vocoder_paced_audio(
+    audio_path: Path | str,
+    output_path: Path | str,
+    pace: float,
+) -> Path:
+    """Write pace-adjusted audio using an STFT phase vocoder.
+
+    Args:
+        audio_path: Input audio file.
+        output_path: Output path for processed audio (WAV recommended).
+        pace: Duration scale factor. >1 stretches, <1 compresses.
+
+    Returns:
+        Absolute path to the written output file.
+    """
+    if pace <= 0:
+        raise ValueError("pace must be > 0")
+
+    in_path = Path(audio_path).expanduser().resolve()
+    out_path = Path(output_path).expanduser().resolve()
+
+    signal, sample_rate = librosa.load(in_path, sr=None, mono=False)
+    if signal.ndim == 1:
+        signal = signal[np.newaxis, :]
+
+    source_samples = int(signal.shape[-1])
+    target_samples = max(1, int(round(source_samples * pace)))
+
+    processed_channels = [
+        _time_scale_channel_stft_vocoder(channel, pace=pace, target_samples=target_samples)
+        for channel in signal
+    ]
+    stacked = np.stack(processed_channels, axis=0)
+
+    if stacked.shape[0] == 1:
+        output_signal: np.ndarray = stacked[0]
+    else:
+        output_signal = stacked.T
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(out_path, output_signal, sample_rate)
+    return out_path
+
+
 def _allocate_segment_frames(weighted_frames: np.ndarray, target_total: int) -> list[int]:
     """Allocate integer frame counts that sum to target_total.
 
@@ -238,12 +302,66 @@ def _allocate_segment_frames(weighted_frames: np.ndarray, target_total: int) -> 
     return [int(value) for value in frames]
 
 
+def create_paced_audio_stft_vocoder(
+    audio_path: Path | str,
+    output_path: Path | str,
+    pace: float,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+) -> Path:
+    """Create a time-scaled audio file using an STFT phase vocoder.
+
+    Args:
+        audio_path: Input audio file path
+        output_path: Output audio file path
+        pace: Duration scale factor. >1 stretches, <1 compresses.
+        n_fft: FFT size for STFT analysis
+        hop_length: Hop size for STFT analysis
+
+    Returns:
+        Path to the written audio file
+    """
+    if pace <= 0:
+        raise ValueError("pace must be > 0")
+
+    src = Path(audio_path)
+    if not src.exists():
+        raise FileNotFoundError(f"Audio file not found: {src}")
+
+    dst = Path(output_path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    # librosa phase vocoder rate semantics: >1 speeds up (shorter), <1 slows down (longer).
+    rate = 1.0 / pace
+    target_dtype = np.float32
+
+    data, sr = sf.read(src, always_2d=True)
+    if data.size == 0:
+        raise ValueError(f"Audio file has no samples: {src}")
+
+    channels = []
+    for ch in range(data.shape[1]):
+        channel = data[:, ch].astype(np.float32, copy=False)
+        stft = librosa.stft(channel, n_fft=n_fft, hop_length=hop_length)
+        stretched_stft = librosa.phase_vocoder(stft, rate=rate, hop_length=hop_length)
+        target_len = max(1, int(round(channel.shape[0] * pace)))
+        stretched = librosa.istft(stretched_stft, hop_length=hop_length, length=target_len)
+        channels.append(stretched.astype(target_dtype, copy=False))
+
+    # Align channels to the shortest length after ISTFT boundary handling.
+    min_len = min(ch.shape[0] for ch in channels)
+    stacked = np.stack([ch[:min_len] for ch in channels], axis=1)
+    sf.write(dst, stacked, sr)
+    return dst
+
+
 def generate_timeline_from_audio(
     audio_path: Path | str,
     keyframe_paths: list[Path | str] | None = None,
     fps: int = 24,
     min_segment_frames: int = 8,
     max_segment_frames: int = 64,
+    pace: float = 1.0,
 ) -> dict[str, Any]:
     """Generate a timeline JSON from an audio file.
     
@@ -260,16 +378,21 @@ def generate_timeline_from_audio(
         fps: Target frames per second
         min_segment_frames: Minimum frames per segment
         max_segment_frames: Maximum frames per segment
+        pace: Global pace scale for timeline length. 1.0 matches audio duration,
+            >1.0 creates longer/slower timelines, <1.0 creates shorter/faster timelines.
         
     Returns:
         Timeline dictionary ready for JSON serialization
     """
+    if pace <= 0:
+        raise ValueError("pace must be > 0")
+
     features = load_and_analyze_audio(audio_path)
 
     # Extract segment boundaries from audio
     segment_times, segment_energies = extract_beat_timeline(features, fps=fps)
 
-    target_total_frames = max(2, int(round(features.duration_seconds * fps)))
+    target_total_frames = max(2, int(round(features.duration_seconds * fps * pace)))
     target_segment_frames = target_total_frames - 1
 
     # Ensure one frame can be assigned per segment while preserving total duration.
@@ -359,6 +482,10 @@ def generate_timeline_from_audio(
             "spline_endpoint": "mirror",
         },
         "segments": segment_specs,
+        "render_hints": {
+            "audio_path": str(Path(audio_path).expanduser().resolve()),
+            "audio_pace": float(pace),
+        },
     }
 
     return timeline
